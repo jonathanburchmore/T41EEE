@@ -1,8 +1,7 @@
-#ifndef BEENHERE
-#include "SDT.h"
-#endif
 
-// JSON experiment.  This was derived from a JSON example from the ArduinoJSON library.
+#include "SDT.h"
+
+// JSON format used to save and read from SD card.  This was derived from a JSON example from the ArduinoJSON library.
 
 // Loads the EEPROMData configuration from a file
 FLASHMEM void loadConfiguration(const char *filename, config_t &EEPROMData) {
@@ -31,9 +30,10 @@ FLASHMEM void loadConfiguration(const char *filename, config_t &EEPROMData) {
   EEPROMData.rfGainCurrent = doc["rfGainCurrent"];
   for (int i = 0; i < NUMBER_OF_BANDS; i++) EEPROMData.rfGain[i] = doc["rfGain"][i];
   EEPROMData.autoGain = doc["autoGain"];
-  EEPROMData.spectrumNoiseFloor = doc["spectrumNoiseFloor"];
-  EEPROMData.tuneIndex = doc["tuneIndex"];
-  EEPROMData.stepFineTune = doc["stepFineTune"];
+  EEPROMData.autoSpectrum = doc["autoSpectrum"];
+  EEPROMData.spectrumNoiseFloor = doc["spectrumNoiseFloor"];  // This is a constant.  This does not need to be included in user data.
+  EEPROMData.centerTuneStep = doc["centerTuneStep"];
+  EEPROMData.fineTuneStep = doc["fineTuneStep"];
   EEPROMData.transmitPowerLevel = doc["transmitPowerLevel"];
   EEPROMData.xmtMode = doc["xmtMode"];
   EEPROMData.nrOptionSelect = doc["nrOptionSelect"];
@@ -50,7 +50,7 @@ FLASHMEM void loadConfiguration(const char *filename, config_t &EEPROMData) {
   EEPROMData.sidetoneVolume = doc["sidetoneVolume"];
   EEPROMData.cwTransmitDelay = doc["cwTransmitDelay"];
   EEPROMData.activeVFO = doc["activeVFO"];
-  EEPROMData.freqIncrement = doc["freqIncrement"];
+//  EEPROMData.freqIncrement = doc["freqIncrement"];
   EEPROMData.currentBand = doc["currentBand"];
   EEPROMData.currentBandA = doc["currentBandA"];
   EEPROMData.currentBandB = doc["currentBandB"];
@@ -88,7 +88,7 @@ FLASHMEM void loadConfiguration(const char *filename, config_t &EEPROMData) {
   //EEPROMData.mapFileName  = doc["mapFileName"] | "Boston";
   strlcpy(EEPROMData.mapFileName, doc["mapFileName"] | "Boston", 50);
   //EEPROMData.myCall  = doc["myCall"];
-  strlcpy(EEPROMData.myCall, doc["myCall"] | "Your Call", 10);
+//  strlcpy(EEPROMData.myCall, doc["myCall"] | "Your Call", 10);
   //EEPROMData.myTimeZone  = doc["myTimeZone"];
   strlcpy(EEPROMData.myTimeZone, doc["myTimeZone"] | "EST", 10);
   EEPROMData.separationCharacter = doc["separationCharacter"];
@@ -104,6 +104,13 @@ FLASHMEM void loadConfiguration(const char *filename, config_t &EEPROMData) {
   EEPROMData.buttonThresholdPressed = doc["buttonThresholdPressed"] | 944;
   EEPROMData.buttonThresholdReleased = doc["buttonThresholdReleased"] | 964;
   EEPROMData.buttonRepeatDelay = doc["buttonRepeatDelay"] | 300000;
+  EEPROMData.autoGain = doc["autoGain"] | true;
+  #ifdef QSE2
+  for (int i = 0; i < 7; i++) EEPROMData.iDCoffset[i] = doc["iDCoffset"][i];
+  for (int i = 0; i < 7; i++) EEPROMData.qDCoffset[i] = doc["qDCoffset"][i];
+  EEPROMData.dacOffset = doc["dacOffset"] | 0;
+  #endif
+  EEPROMData.radioCalComplete = doc["radioCalComplete"] | false;
 
   // How to copy strings:
   //  strlcpy(EEPROMData.myCall,                  // <- destination
@@ -124,16 +131,16 @@ FLASHMEM void saveConfiguration(const char *filename, const config_t &EEPROMData
   JsonDocument doc;  // This uses the heap.
 
   // Set the values in the document
-  doc["versionSettings"] = EEPROMData.versionSettings;
-  doc["myCall"] = EEPROMData.myCall;
+  doc["versionSettings"] = VERSION;    // Fix for version not updating in JSON file.  KF5N March 18, 2024.
   doc["AGCMode"] = EEPROMData.AGCMode;
   doc["audioVolume"] = EEPROMData.audioVolume;
   doc["rfGainCurrent"] = EEPROMData.rfGainCurrent;
   for (int i = 0; i < NUMBER_OF_BANDS; i++) doc["rfGain"][i] = EEPROMData.rfGain[i];
   doc["autoGain"] = EEPROMData.autoGain;
+  doc["autoSpectrum"] = EEPROMData.autoSpectrum;
   doc["spectrumNoiseFloor"] = EEPROMData.spectrumNoiseFloor;
-  doc["tuneIndex"] = EEPROMData.tuneIndex;
-  doc["stepFineTune"] = EEPROMData.stepFineTune;
+  doc["centerTuneStep"] = EEPROMData.centerTuneStep;
+  doc["fineTuneStep"] = EEPROMData.fineTuneStep;
   doc["transmitPowerLevel"] = EEPROMData.transmitPowerLevel;
   doc["xmtMode"] = EEPROMData.xmtMode;
   doc["nrOptionSelect"] = EEPROMData.nrOptionSelect;
@@ -150,7 +157,7 @@ FLASHMEM void saveConfiguration(const char *filename, const config_t &EEPROMData
   doc["sidetoneVolume"] = EEPROMData.sidetoneVolume;
   doc["cwTransmitDelay"] = EEPROMData.cwTransmitDelay;
   doc["activeVFO"] = EEPROMData.activeVFO;
-  doc["freqIncrement"] = EEPROMData.freqIncrement;
+//  doc["freqIncrement"] = EEPROMData.freqIncrement;
   doc["currentBand"] = EEPROMData.currentBand;
   doc["currentBandA"] = EEPROMData.currentBandA;
   doc["currentBandB"] = EEPROMData.currentBandB;
@@ -187,7 +194,7 @@ FLASHMEM void saveConfiguration(const char *filename, const config_t &EEPROMData
   }
   doc["centerFreq"] = EEPROMData.centerFreq;
   doc["mapFileName"] = EEPROMData.mapFileName;
-  doc["myCall"] = EEPROMData.myCall;
+//  doc["myCall"] = EEPROMData.myCall;
   doc["myTimeZone"] = EEPROMData.myTimeZone;
   doc["separationCharacter"] = EEPROMData.separationCharacter;
   doc["paddleFlip"] = EEPROMData.paddleFlip;
@@ -202,6 +209,13 @@ FLASHMEM void saveConfiguration(const char *filename, const config_t &EEPROMData
   doc["buttonThresholdPressed"] = EEPROMData.buttonThresholdPressed;
   doc["buttonThresholdReleased"] = EEPROMData.buttonThresholdReleased;
   doc["buttonRepeatDelay"] = EEPROMData.buttonRepeatDelay;
+  doc["autoGain"] = EEPROMData.autoGain;
+  #ifdef QSE2
+  for (int i = 0; i < 7; i++) doc["iDCoffset"][i] = EEPROMData.iDCoffset[i];
+  for (int i = 0; i < 7; i++) doc["qDCoffset"][i] = EEPROMData.qDCoffset[i];
+  doc["dacOffset"] = EEPROMData.dacOffset;
+  #endif
+  doc["radioCalComplete"] = EEPROMData.radioCalComplete;
 
   if (toFile) {
     // Delete existing file, otherwise EEPROMData is appended to the file

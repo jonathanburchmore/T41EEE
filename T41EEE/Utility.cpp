@@ -1,33 +1,40 @@
-#ifndef BEENHERE
+
 #include "SDT.h"
-#endif
+
+uint8_t display_dbm = DISPLAY_S_METER_DBM;
+int16_t pos_y_frequency = 48;
+int old_demod_mode = -99;
+int pos_x_frequency = 12;
+float32_t dbmhz = -145.0;
+float32_t m_AttackAlpha = 0.03;
+float32_t m_DecayAlpha = 0.01;
+PROGMEM const char *labels[] = { "Select", "Menu Up", "Band Up",
+                         "Zoom", "Menu Dn", "Band Dn",
+                         "Filter", "DeMod", "Mode",
+                         "NR", "Notch", "Noise Floor",
+                         "Coarse Incr", "Decoder", "Fine Increment",
+                         "Reset Tuning", "Frequ Entry", "User 2" };
+
 
 /*****
   Purpose: Generate Array with variable sinewave frequency tone AFP 05-17-22
   Parameter list:
-    void
+    int numCycles  (This must be an integer value)
   Return value;
     void
 *****/
 FLASHMEM void sineTone(int numCycles) {
-  float theta;
-  float freqSideTone2;
-  // freqSideTone3, 3000 Hz, is used during TX calibration.
-  //  float freqSideTone3 = 3000;         // Refactored 32 * 24000 / 256; //AFP 2-7-23
-  //  float freqSideTone4 = 375;  Not used.
-  freqSideTone2 = numCycles * 24000 / 256;  // 750.0
-  for (int kf = 0; kf < 256; kf++) {        //Calc: numCycles=8, 750 hz sine wave.
-    theta = kf * 2 * PI * freqSideTone2 / 24000;
-    sinBuffer2[kf] = sin(theta);  // Used in CW_Excite.cpp
-    cosBuffer2[kf] = cos(theta);  // Used in CW_Excite.cpp
-                                  //    theta = kf * 2.0 * PI * freqSideTone3 / 24000;
-                                  //    sinBuffer3[kf] = sin(theta);  // Used in Process2.cpp.  This is only periodically used for calibration.
-                                  //    cosBuffer3[kf] = cos(theta);  // Used in Process2.cpp.  This could be added to one of the calibration functions so it is not always sitting on the stack.
-                                  //    theta = kf * 2.0 * PI * freqSideTone4 / 24000;
-                                  //    sinBuffer4[kf] = sin(theta);
-                                  //    cosBuffer4[kf] = cos(theta);
+  int kf;
+  float theta, increment;
+  float freqSideTone;
+  freqSideTone = numCycles * 24000.0 / 256.0;
+  for (kf = 0, increment = 0.0; kf < 256; increment += 1.0, kf++) {        // Calc: numCycles = 8, 750 hz sine wave.
+    theta = increment * 2.0 * PI * freqSideTone / 24000.0;
+    sinBuffer[kf] = sin(theta);  // Used in CW decoder. 
+    cosBuffer[kf] = cos(theta);  // Used in CW_Excite.cpp
   }
 }
+
 
 /*****
   Purpose: Generate ~5ms raised cosine wave-shaping arrays
@@ -36,7 +43,6 @@ FLASHMEM void sineTone(int numCycles) {
   Return value;
     void
 *****/
-
 FLASHMEM void initCWShaping() {
   int pos;
   float deg;
@@ -61,6 +67,7 @@ FLASHMEM void initCWShaping() {
     cwFallBuffer[pos] = (1.0 + cos(deg / 57.3 /* fixed conversion to radians */)) / 2.0;
   }
 }
+
 
 const float32_t atanTable[68] = {
   -0.015623728620477f,
@@ -133,25 +140,11 @@ const float32_t atanTable[68] = {
   0.800781565178043f
 };
 
-/*****
-  Purpose: Generate Array with variable sinewave frequency tone
-  Parameter list:
-    void
-  Return value;
-    void
-*****/
-/*void SinTone(long freqSideTone) { // AFP 10-25-22
-  float theta;
-  for (int kf = 0; kf < 255; kf++) { //Calc 750 hz sine wave.  use 750 because it is 8 whole cycles in 256 buffer.
-    theta = kf * 2 * PI * freqSideTone / 24000;
-    sinBuffer2[kf] = sin(theta);
-  }
-  }*/
 
 /*****
-  Purpose: Correct Phase angle between I andQ channels
+  Purpose: Correct Phase angle between I and Q channels
   Parameter list:
-    void
+    float32_t *I_buffer, float32_t *Q_buffer, float32_t factor, uint32_t blocksize
   Return value;
     void
 *****/
@@ -165,6 +158,7 @@ void IQPhaseCorrection(float32_t *I_buffer, float32_t *Q_buffer, float32_t facto
     arm_add_f32(I_buffer, temp_buffer, I_buffer, blocksize);
   }
 }  // end IQphase_correction
+
 
 /*****
   Purpose: Calculate sinc function
@@ -181,6 +175,7 @@ float MSinc(int m, float fc) {
   else
     return sinf(x * fc) / (fc * x);
 }
+
 
 /*****
   Purpose: Izero
@@ -237,6 +232,7 @@ float32_t log10f_fast(float32_t X) {
   return (Y * 0.3010299956639812f);
 }
 
+
 /*****
   Purpose: void Calculatedbm()
 
@@ -247,7 +243,6 @@ float32_t log10f_fast(float32_t X) {
     void
 *****/
 void Calculatedbm() {
-
   // calculation of the signal level inside the filter bandwidth
   // taken from the spectrum display FFT
   // taking into account the analog gain before the ADC
@@ -281,7 +276,6 @@ void Calculatedbm() {
 
   //  determine Lbin and Ubin from ts.dmod_mode and FilterInfo.width
   //  = determine bandwith separately for lower and upper sideband
-
 
   bw_LSB = bands[EEPROMData.currentBand].FLoCut;
   bw_USB = bands[EEPROMData.currentBand].FHiCut;
@@ -319,8 +313,6 @@ void Calculatedbm() {
         break;
     }
   }
-
-
   // lowpass IIR filter
   // Wheatley 2011: two averagers with two time constants
   // IIR filter with one element analog to 1st order RC filter
@@ -413,6 +405,7 @@ float32_t arm_atan2_f32(float32_t y, float32_t x) {
   return (atan2Val); /* Return the output value */
 }
 
+
 /*****
   Purpose:
   Parameter list:
@@ -456,7 +449,6 @@ float ApproxAtan(float z) {
   const float n2 = -0.19194795f;
   return (n1 + n2 * z * z) * z;
 }
-
 
 
 /*****
@@ -518,7 +510,7 @@ void SaveAnalogSwitchValues() {
       while (true) {
         value = ReadSelectedPushButton();
         if (value < NOTHING_TO_SEE_HERE && value > 0) {
-          MyDelay(100L);
+          delay(100L);
           if (value < minVal) {
             minVal = value;
           } else {
@@ -551,8 +543,8 @@ void SaveAnalogSwitchValues() {
   }
 
   EEPROMData.buttonRepeatDelay = origRepeatDelay;  // Restore original repeat delay
-  //  EEPROM.put(0, EEPROMData);                        // Done by EEPROMStartup().
 }
+
 
 // ================== Clock stuff
 /*****
@@ -642,12 +634,6 @@ void SetupMode(int sideBand) {
 }  // end void setup_mode
 
 
-int Xmit_IQ_Cal()  //AFP 09-21-22
-{
-  return -1;
-}
-
-
 /*****
   Purpose: set Band
   Parameter list:
@@ -691,4 +677,61 @@ int SDPresentCheck() {
   } else {
     return 0;
   }
+}
+
+
+/*****
+  Purpose: Initialize power coefficients based on transmit power level and calibration factor.
+
+  Parameter list:
+    void
+
+  Return value;
+    void
+*****/
+FLASHMEM void initPowerCoefficients() {
+      for(int i = 0; i < NUMBER_OF_BANDS; i = i + 1) {        
+         EEPROMData.powerOutCW[i] = sqrt(EEPROMData.transmitPowerLevel/20.0) * EEPROMData.CWPowerCalibrationFactor[i];
+         EEPROMData.powerOutSSB[i] =  sqrt(EEPROMData.transmitPowerLevel/20.0) * EEPROMData.SSBPowerCalibrationFactor[i];
+      }
+}
+
+
+FLASHMEM void initUserDefinedStuff() {
+  NR_Index = EEPROMData.nrOptionSelect;
+  TxRxFreq = EEPROMData.centerFreq = EEPROMData.lastFrequencies[EEPROMData.currentBand][EEPROMData.activeVFO];
+  SetKeyPowerUp();  // Use EEPROMData.keyType and EEPROMData.paddleFlip to configure key GPIs.  KF5N August 27, 2023
+  SetDitLength(EEPROMData.currentWPM);
+  SetTransmitDitLength(EEPROMData.currentWPM);
+  // Initialize buffers used by the CW transmitter and CW decoder.
+  sineTone(EEPROMData.CWOffset + 6);  // This function takes "number of cycles" which is the offset + 6.
+  si5351.set_correction(EEPROMData.freqCorrectionFactor, SI5351_PLL_INPUT_XO);
+  initCWShaping();
+  initPowerCoefficients();
+  ResetHistograms();  // KF5N February 20, 2024
+}
+
+
+/*****
+  Purpose: Arm function which is not included in the older library included with TeensyDuino.
+  
+  https://www.keil.com/pack/doc/cmsis/dsp/html/arm__clip__f32_8c.html
+
+*****/
+void arm_clip_f32(const float32_t * pSrc, 
+  float32_t * pDst, 
+  float32_t low, 
+  float32_t high, 
+  uint32_t numSamples)
+{
+    uint32_t i;
+    for (i = 0; i < numSamples; i++)
+    {                                        
+        if (pSrc[i] > high)                  
+            pDst[i] = high;                  
+        else if (pSrc[i] < low)              
+            pDst[i] = low;                   
+        else                                 
+            pDst[i] = pSrc[i];               
+    }
 }

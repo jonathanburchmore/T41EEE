@@ -1,6 +1,39 @@
-#ifndef BEENHERE
+
 #include "SDT.h"
-#endif
+
+uint8_t NR_use_X = 0;
+int ANR_buff_size = FFT_length / 2.0;
+int ANR_delay = 16;
+int ANR_dline_size = ANR_DLINE_SIZE;
+int ANR_in_idx = 0;
+int ANR_mask = ANR_dline_size - 1;
+int ANR_taps = 64;
+int lidx;
+int LMS_nr_strength;
+uint32_t NR_X_pointer = 0;
+uint32_t NR_E_pointer = 0;
+float32_t c0[SAM_PLL_HILBERT_STAGES];
+float32_t ANR_den_mult = 6.25e-10;
+float32_t ANR_gamma = 0.1;
+float32_t ANR_lidx = 120.0;
+float32_t ANR_lidx_min = 120.0;
+float32_t ANR_lidx_max = 200.0;
+float32_t ANR_lincr = 1.0;
+float32_t ANR_ldecr = 3.0;
+float32_t ANR_ngamma = 0.001;
+float32_t ANR_two_mu = 0.0001;
+float32_t LMS_errsig1[256 + 10];
+float32_t NR_sum = 0;
+float32_t NR_KIM_K = 1.0;
+float32_t NR_onemalpha = (1.0 - EEPROMData.NR_alpha);
+float32_t NR_onemtwobeta = (1.0 - (2.0 * EEPROMData.NR_beta));
+float32_t NR_T;
+
+float32_t DMAMEM ANR_d[ANR_DLINE_SIZE] = {0};
+float32_t DMAMEM ANR_w[ANR_DLINE_SIZE] = {0};
+float32_t DMAMEM LMS_StateF32[MAX_LMS_TAPS + MAX_LMS_DELAY] = {0};
+float32_t DMAMEM LMS_NormCoeff_f32[MAX_LMS_TAPS + MAX_LMS_DELAY] = {0};
+float32_t DMAMEM LMS_nr_delay[512 + MAX_LMS_DELAY] = {0};
 
 
 const float32_t sqrtHann[256] = {
@@ -49,22 +82,23 @@ const float32_t sqrtHann[256] = {
   Return value
     int           an index into the band array, 0 for off, -1 for cancel
 *****/
-int NROptions() //AFP 09-19-22 Moved here from Menu Proc Revised
+void NROptions() //AFP 09-19-22 Moved here from Menu Proc Revised
 {
   switch (EEPROMData.nrOptionSelect) {
     case 0:                                 // Off
-      NR_Index=0;
+      NR_Index = 0;
       break;
     case 1:                                 // Kim
-      NR_Index=1;
+      NR_Index = 1;
       break;
 
     case 2:                                 // Spectral
-      NR_Index=2;
+      NR_Index = 2;
       break;
 
-    case 3:                                 // LMS
-      NR_Index=3;
+    case 3:                                 // LMS.
+      NR_Index = 3;
+//      ANR_notchOn = 0;  //  LMS noise reduction conflicts with AutoNotch.  Turn off AutoNotch when this is selected.
       break;
 
     default:
@@ -72,7 +106,7 @@ int NROptions() //AFP 09-19-22 Moved here from Menu Proc Revised
       NR_Index = -1;                        // Force hard error
       break;
   } 
-  return NR_Index;
+//  return NR_Index;  Changed function to void.  KF5N March 2, 2024.
 }  //AFP 09-19-22
 
 
@@ -101,7 +135,6 @@ void Kim1_NR()
     // 1.) we use power instead of magnitude for X
     // 2.) we need to clamp for negative gains . . .
     ////////////////////////////////////////////////////////////////////////////////////////////////////////
-
     // perform a loop two times (each time process 128 new samples)
     // FFT 256 points
     // frame step 128 samples
@@ -164,7 +197,6 @@ void Kim1_NR()
         float32_t temp_sample = 0.5 * (float32_t)(1.0 - (cosf(PI * 2.0 * (float32_t)idx / (float32_t)((NR_FFT_L) - 1))));
         NR_FFT_buffer[idx * 2] *= temp_sample;
       }
-
 
 #if 0     // Odd way to comment something out. Not sure why they did this. JJP
 
@@ -248,7 +280,6 @@ void Kim1_NR()
         NR_E_pointer = 0;
       }
 
-
 #if 0
       for (int idx = 1; idx < 20; idx++) {      // bins 2 to 29 attenuated set real values to 0.1 of their original value
         NR_iFFT_buffer[idx * 2] *= 0.1;
@@ -279,9 +310,11 @@ void Kim1_NR()
       float_buffer_R[i] = float_buffer_L[i];
     }
   } // end of Kim et al. 2002 algorithm
-
 }
+
+
 /*****
+  This function appears to have both notch and noise reduction capability.
   Purpose:   void xanr
   Parameter list:
     void
@@ -336,6 +369,7 @@ void Xanr() // variable leak LMS algorithm for automatic notch or noise reductio
     ANR_in_idx = (ANR_in_idx + ANR_mask) & ANR_mask;
   }
 }
+
 
 /*****
   Purpose: spectral_noise_reduction
@@ -406,7 +440,6 @@ void SpectralNoiseReduction()
   // / rate DF SR[SampleRate].rate/DF
   lf_freq /= ((SR[SampleRate].rate / DF) / NR_FFT_L); // bin BW is 46.9Hz [12000Hz / 256 bins] @96kHz
   uf_freq /= ((SR[SampleRate].rate / DF) / NR_FFT_L);
-
 
   // INITIALIZATION ONCE 1
   if (NR_first_time_2 == 1) { // TODO: properly initialize all the variables
@@ -613,6 +646,7 @@ void SpectralNoiseReduction()
   }
 }
 
+
 /*****
   Purpose: void LMSNoiseReduction(
   
@@ -635,6 +669,7 @@ void LMSNoiseReduction(int16_t blockSize, float32_t *nrbuffer)
   lms1_inbuf %= 512;
   lms1_outbuf %= 512;
 }
+
 
 /*****
   Purpose: void InitLMSNoiseReduction()
@@ -671,8 +706,9 @@ void InitLMSNoiseReduction()
 
   // use "canned" init to initialize the filter coefficients
   arm_lms_norm_init_f32(&LMS_Norm_instance, calc_taps, &LMS_NormCoeff_f32[0], &LMS_StateF32[0], mu_calc, 256);
-
 }
+
+
 /*****
   Purpose:
   Parameter list:

@@ -1,6 +1,10 @@
-#ifndef BEENHERE
 #include "SDT.h"
-#endif
+
+bool save_last_frequency = false;
+int directFreqFlag = 0;
+int32_t subMenuMaxOptions;  // Holds the number of submenu options.
+long TxRxFreqOld;
+
 
 /*****
   Purpose: To process a menu increase button push
@@ -12,20 +16,12 @@
     void
 *****/
 void ButtonMenuIncrease() {
-  if (menuStatus == PRIMARY_MENU_ACTIVE) {
     mainMenuIndex++;
     if (mainMenuIndex == TOP_MENU_COUNT) {  // At last menu option, so...
       mainMenuIndex = 0;                    // ...wrap around to first menu option
     }
-  } else {
-    if (menuStatus == SECONDARY_MENU_ACTIVE) {
-      secondaryMenuIndex++;
-      if (secondaryMenuIndex == subMenuMaxOptions) {  // Same here...
-        secondaryMenuIndex = 0;
-      }
-    }
-  }
 }
+
 
 /*****
   Purpose: To process a menu decrease button push
@@ -37,21 +33,12 @@ void ButtonMenuIncrease() {
     void
 *****/
 void ButtonMenuDecrease() {
-  if (menuStatus == PRIMARY_MENU_ACTIVE) {
-    mainMenuIndex--;
+   mainMenuIndex--;
     if (mainMenuIndex < 0) {               // At last menu option, so...
       mainMenuIndex = TOP_MENU_COUNT - 1;  // ...wrap around to first menu option
     }
-  } else {
-    if (menuStatus == SECONDARY_MENU_ACTIVE) {
-      secondaryMenuIndex--;
-      if (secondaryMenuIndex < 0) {  // Same here...
-        secondaryMenuIndex = subMenuMaxOptions - 1;
-      }
-    }
-  }
 }
-//==================  AFP 09-27-22
+
 
 /*****
   Purpose: To process a band increase button push
@@ -129,7 +116,6 @@ void ButtonBandIncrease() {
   SetFreq();
   ShowFrequency();
   ShowSpectrumdBScale();
-  MyDelay(1L);
   AudioInterrupts();
   EEPROMWrite();
   // Draw or not draw CW filter graphics to audio spectrum area.  KF5N July 30, 2023
@@ -140,7 +126,9 @@ void ButtonBandIncrease() {
   DrawBandWidthIndicatorBar();
   DrawFrequencyBarValue();
   UpdateDecoderField();
+  FilterSetSSB();
 }
+
 
 /*****
   Purpose: To process a band decrease button push
@@ -153,8 +141,6 @@ void ButtonBandIncrease() {
 *****/
 void ButtonBandDecrease() {
   int tempIndex = EEPROMData.currentBand;
-  ;
-  //  NCOFreq = 0L;
 
   EEPROMData.currentBand--;  // decrement band index
 
@@ -227,7 +213,6 @@ void ButtonBandDecrease() {
   SetBand();
   SetFreq();
   ShowFrequency();
-  MyDelay(1L);
   ShowSpectrumdBScale();
   AudioInterrupts();
   EEPROMWrite();
@@ -239,6 +224,97 @@ void ButtonBandDecrease() {
   DrawBandWidthIndicatorBar();
   DrawFrequencyBarValue();
   UpdateDecoderField();
+  FilterSetSSB();
+}
+
+
+/*****
+  Purpose: Set the radio to a band using the band parameter.
+
+  Parameter list:
+    int band
+
+  Return value:
+    void
+*****/
+void BandSet(int band) {
+  int tempIndex;
+  tempIndex = EEPROMData.currentBandA;
+  if (EEPROMData.currentBand == NUMBER_OF_BANDS) {  // Incremented too far?
+    EEPROMData.currentBand = 0;                     // Yep. Roll to list front.
+  }
+  NCOFreq = 0L;
+  switch (EEPROMData.activeVFO) {
+    case VFO_A:
+      tempIndex = EEPROMData.currentBandA;
+      if (save_last_frequency == 1) {
+        EEPROMData.lastFrequencies[tempIndex][VFO_A] = TxRxFreq;
+      } else {
+        if (save_last_frequency == 0) {
+          if (directFreqFlag == 1) {
+            EEPROMData.lastFrequencies[tempIndex][VFO_A] = TxRxFreqOld;
+          } else {
+            if (directFreqFlag == 0) {
+              EEPROMData.lastFrequencies[tempIndex][VFO_A] = TxRxFreq;
+            }
+          }
+          TxRxFreqOld = TxRxFreq;
+        }
+      }
+      EEPROMData.currentBandA = band;
+      if (EEPROMData.currentBandA == NUMBER_OF_BANDS) {  // Incremented too far?
+        EEPROMData.currentBandA = 0;                     // Yep. Roll to list front.
+      }
+      EEPROMData.currentBand = EEPROMData.currentBandA;
+      EEPROMData.centerFreq = TxRxFreq = EEPROMData.currentFreqA = EEPROMData.lastFrequencies[EEPROMData.currentBandA][VFO_A] + NCOFreq;
+      break;
+
+    case VFO_B:
+      tempIndex = EEPROMData.currentBandB;
+      if (save_last_frequency == 1) {
+        EEPROMData.lastFrequencies[tempIndex][VFO_B] = TxRxFreq;
+      } else {
+        if (save_last_frequency == 0) {
+          if (directFreqFlag == 1) {
+            EEPROMData.lastFrequencies[tempIndex][VFO_B] = TxRxFreqOld;
+          } else {
+            if (directFreqFlag == 0) {
+              EEPROMData.lastFrequencies[tempIndex][VFO_B] = TxRxFreq;
+            }
+          }
+          TxRxFreqOld = TxRxFreq;
+        }
+      }
+      EEPROMData.currentBandB = band;
+      if (EEPROMData.currentBandB == NUMBER_OF_BANDS) {  // Incremented too far?
+        EEPROMData.currentBandB = 0;                     // Yep. Roll to list front.
+      }
+      EEPROMData.currentBand = EEPROMData.currentBandB;
+      EEPROMData.centerFreq = TxRxFreq = EEPROMData.currentFreqB = EEPROMData.lastFrequencies[EEPROMData.currentBandB][VFO_B] + NCOFreq;
+      break;
+
+    case VFO_SPLIT:
+      DoSplitVFO();
+      break;
+  }
+  directFreqFlag = 0;
+  EraseSpectrumDisplayContainer();
+  DrawSpectrumDisplayContainer();
+  SetBand();
+  SetFreq();
+  ShowFrequency();
+  ShowSpectrumdBScale();
+  AudioInterrupts();
+  EEPROMWrite();
+  // Draw or not draw CW filter graphics to audio spectrum area.  KF5N July 30, 2023
+  tft.writeTo(L2);
+  tft.clearMemory();
+  tft.writeTo(L1);
+  if (EEPROMData.xmtMode == CW_MODE) BandInformation();
+  DrawBandWidthIndicatorBar();
+  DrawFrequencyBarValue();
+  UpdateDecoderField();
+  FilterSetSSB();
 }
 
 
@@ -273,10 +349,13 @@ void ButtonZoom() {
   ShowFrequency();
   ShowBandwidth();
   ResetTuning();  // AFP 10-11-22
+  FilterSetSSB();
 }
 
+
 /*****
-  Purpose: To process a filter button push
+  Purpose: To process a filter button push.  This switches the Filter Encoder from the lower limit to the upper limit
+           of the audio filter.
 
   Parameter list:
     void
@@ -285,12 +364,13 @@ void ButtonZoom() {
     void
 *****/
 void ButtonFilter() {
-  switchFilterSideband = !switchFilterSideband;
+  switchFilterSideband =  not switchFilterSideband;
+  FilterSetSSB();  // Call this so the delimiter is set to the correct color.
   ControlFilterF();
   FilterBandwidth();
-  //SetFreq();
   ShowFrequency();
 }
+
 
 /*****
   Purpose: Process demodulation mode
@@ -306,7 +386,6 @@ void ButtonDemodMode() {
   if (bands[EEPROMData.currentBand].mode > DEMOD_MAX) {
     bands[EEPROMData.currentBand].mode = DEMOD_MIN;  // cycle thru demod modes
   }
-  //AudioNoInterrupts();
   BandInformation();
   SetupMode(bands[EEPROMData.currentBand].mode);
   ShowFrequency();
@@ -317,15 +396,16 @@ void ButtonDemodMode() {
   DrawBandWidthIndicatorBar();  // Restory the bandwidth indicator bar.  KF5N July 30, 2023
   FilterBandwidth();
   DrawSMeterContainer();
-  ShowAnalogGain();
+//  ShowAnalogGain();
   AudioInterrupts();
   SetFreq();                                                                                   // Must update frequency, for example moving from SSB to CW, the RX LO is shifted.  KF5N
   if ((EEPROMData.xmtMode == CW_MODE) && (EEPROMData.decoderFlag == 1)) UpdateDecoderField();  // KF5N December 28 2023.
+  FilterSetSSB();
 }
 
 
 /*****
-  Purpose: Set transmission mode for SSB or CW
+  Purpose: Set transmission mode for SSB or CW.
 
   Parameter list:
     void
@@ -340,10 +420,7 @@ void ButtonMode()  //====== Changed AFP 10-05-22  =================
   } else {
     EEPROMData.xmtMode = CW_MODE;
   }
-  //fLoCutOld = bands[EEPROMData.currentBand].FLoCut;
-  //fHiCutOld = bands[EEPROMData.currentBand].FHiCut;
   SetFreq();  // Required due to RX LO shift from CW to SSB modes.  KF5N
-  //tft.fillWindow();  // This was erasing the waterfall when switching modes.  Removed by KF5N.
   DrawSpectrumDisplayContainer();
   DrawFrequencyBarValue();
   DrawInfoWindowFrame();
@@ -359,7 +436,6 @@ void ButtonMode()  //====== Changed AFP 10-05-22  =================
   DrawAudioSpectContainer();
   SpectralNoiseReductionInit();
   UpdateNoiseField();
-  ShowName();
   ShowSpectrumdBScale();
   ShowTransmitReceiveStatus();
   ShowFrequency();
@@ -369,7 +445,9 @@ void ButtonMode()  //====== Changed AFP 10-05-22  =================
     tft.clearMemory();
   } else BandInformation();
   DrawBandWidthIndicatorBar();
+  FilterSetSSB();
 }
+
 
 /*****
   Purpose: To process select noise reduction
@@ -386,9 +464,11 @@ void ButtonNR()  //AFP 09-19-22 update
   if (EEPROMData.nrOptionSelect > 3) {
     EEPROMData.nrOptionSelect = 0;
   }
-  NROptions();  //AFP 09-19-22
+  if (EEPROMData.nrOptionSelect == 3) ANR_notch = false;  // Turn off AutoNotch if LMS NR is selected.
+  NROptions();                                        //AFP 09-19-22
   UpdateNoiseField();
 }
+
 
 /*****
   Purpose: To set the notch filter
@@ -400,8 +480,12 @@ void ButtonNR()  //AFP 09-19-22 update
     void
 *****/
 void ButtonNotchFilter() {
-  ANR_notchOn = !ANR_notchOn;
-  MyDelay(100L);
+  ANR_notch = !ANR_notch;
+  //  If the notch is activated and LMS NR is also active, turn off NR and update display.
+  if (ANR_notch && EEPROMData.nrOptionSelect == 3) {
+    EEPROMData.nrOptionSelect = 0;  // Turn off noise reduction.  Other NR selections will be valid.
+    UpdateNoiseField();
+  }
 }
 
 
@@ -412,35 +496,25 @@ void ButtonNotchFilter() {
     void
 
   Return value;
-    int           the current noise floor value
+    void
 *****/
-int ButtonSetNoiseFloor() {
+void ButtonSetNoiseFloor() {
   int floor = EEPROMData.currentNoiseFloor[EEPROMData.currentBand];  // KF5N
   int val;
 
   tft.setFontScale((enum RA8875tsize)1);
   ErasePrimaryMenu();
   tft.fillRect(SECONDARY_MENU_X - 100, MENUS_Y, EACH_MENU_WIDTH + 120, CHAR_HEIGHT, RA8875_MAGENTA);
-  //tft.setTextColor(RA8875_WHITE);
   tft.setTextColor(RA8875_BLACK);  // JJP 7/17/23
   tft.setCursor(SECONDARY_MENU_X - 98, MENUS_Y + 1);
   tft.print("Pixels above axis:");
   tft.setCursor(SECONDARY_MENU_X + 200, MENUS_Y + 1);
   tft.print(EEPROMData.currentNoiseFloor[EEPROMData.currentBand]);
-  MyDelay(150L);
+  delay(150L);
 
   while (true) {
     if (filterEncoderMove != 0) {
       floor += filterEncoderMove;  // It moves the display
-      /* JJP 7/17/23
-      if (floor < -15) {           //AFP 09-22-22                        // Don't exceed limits
-        floor = -15;               //AFP 09-22-22
-      } else {
-        if (floor > SPECTRUM_HEIGHT) {
-          floor = SPECTRUM_HEIGHT;
-        }
-      }
-      */
       EraseSpectrumWindow();
       floor = DrawNewFloor(floor);
       tft.fillRect(SECONDARY_MENU_X + 190, MENUS_Y, 80, CHAR_HEIGHT, RA8875_MAGENTA);
@@ -450,20 +524,10 @@ int ButtonSetNoiseFloor() {
     }
 
     val = ReadSelectedPushButton();  // Get ADC value
-    MyDelay(100L);
+    delay(100L);
     val = ProcessButtonPress(val);
     if (val == MENU_OPTION_SELECT)  // If they made a choice...
     {
-      /* JJP 7/17/23
-      if (floor > SPECTRUM_BOTTOM + 15) {  //AFP 09-22-22
-        floor = SPECTRUM_BOTTOM + 15;      //AFP 09-22-22
-      } else {
-        if (floor < SPECTRUM_BOTTOM - 50)
-          floor = SPECTRUM_BOTTOM - 50;
-      }
-      */
-      //  EEPROMData.currentNoiseFloor[EEPROMData.currentBand]             = floor;
-      //      EEPROMData.spectrumNoiseFloor              = floor;
       EEPROMData.currentNoiseFloor[EEPROMData.currentBand] = floor;
       EEPROMWrite();
       break;
@@ -479,8 +543,8 @@ int ButtonSetNoiseFloor() {
   tft.writeTo(L2);
   DrawFrequencyBarValue();
   tft.writeTo(L1);
-  return EEPROMData.spectrumNoiseFloor;
 }
+
 
 /*****
   Purpose: Draw in a red line at the new floor position
@@ -508,6 +572,7 @@ int DrawNewFloor(int floor) {
   return floor;
 }
 
+
 /*****
   Purpose: The next 3 functions are "empty" user-defined function stubs that can be filled in by the user with
            "real" code.
@@ -527,6 +592,8 @@ int Unused2() {
 int Unused3() {
   return -1;
 }
+
+
 /*****
   Purpose: Reset Zoom to zoomIndex
 
@@ -548,11 +615,9 @@ void ResetZoom(int zoomIndex1) {
   ZoomFFTPrep();
   UpdateZoomField();
   DrawBandWidthIndicatorBar();
-  //ShowSpectrumdBScale();
   DrawFrequencyBarValue();
   ShowFrequency();
   ShowBandwidth();
-  //ResetTuning();
   RedrawDisplayScreen();
 }
 
@@ -580,7 +645,6 @@ void ButtonFrequencyEntry() {
   int numdigits = 0;  // number of digits entered
   int pushButtonSwitchIndex;
   EEPROMData.lastFrequencies[EEPROMData.currentBand][EEPROMData.activeVFO] = TxRxFreq;
-  //save_last_frequency = false;                    // prevents crazy frequencies when you change bands/save_last_frequency = true;
   // Arrays for allocating values associated with keys and switches - choose whether USB keypad or analogue switch matrix
   // USB keypad and analogue switch matrix
   const char *DE_Band[] = { "80m", "40m", "20m", "17m", "15m", "12m", "10m" };
@@ -679,7 +743,6 @@ void ButtonFrequencyEntry() {
   tft.print("Enter Frequency");
 
   tft.fillRect(SECONDARY_MENU_X + 20, MENUS_Y, EACH_MENU_WIDTH + 10, CHAR_HEIGHT, RA8875_MAGENTA);
-  //tft.setTextColor(RA8875_WHITE);
   tft.setTextColor(RA8875_BLACK);  // JJP 7/17/23
   tft.setCursor(SECONDARY_MENU_X + 21, MENUS_Y + 1);
   tft.print("kHz or MHz:");
@@ -760,11 +823,10 @@ void ButtonFrequencyEntry() {
       tft.fillRect(SECONDARY_MENU_X + 195, MENUS_Y + 1, 85, CHAR_HEIGHT, RA8875_MAGENTA);
       tft.setCursor(SECONDARY_MENU_X + 200, MENUS_Y + 1);
       tft.print(strF);
-      MyDelay(250);  // only for analogue switch matrix
+      delay(250);  // only for analogue switch matrix
     }
   }
   if (key != 0x58) {
-
     TxRxFreq = enteredF;
   }
   NCOFreq = 0L;
@@ -772,7 +834,6 @@ void ButtonFrequencyEntry() {
   EEPROMData.centerFreq = TxRxFreq;
   centerTuneFlag = 1;  // Put back in so tuning bar is refreshed.  KF5N July 31, 2023
   SetFreq();           // Used here instead of centerTuneFlag.  KF5N July 22, 2023
-  //}
   if (save_last_frequency == 1) {
     EEPROMData.lastFrequencies[EEPROMData.currentBand][EEPROMData.activeVFO] = enteredF;
   } else {
@@ -788,7 +849,6 @@ void ButtonFrequencyEntry() {
   SetBand();
   SetFreq();
   ShowFrequency();
-  MyDelay(1L);
   ShowSpectrumdBScale();
   AudioInterrupts();
   EEPROMWrite();
@@ -798,4 +858,5 @@ void ButtonFrequencyEntry() {
   if (EEPROMData.xmtMode == CW_MODE) BandInformation();
   DrawBandWidthIndicatorBar();
   RedrawDisplayScreen();  // KD0RC
+  FilterSetSSB();
 }

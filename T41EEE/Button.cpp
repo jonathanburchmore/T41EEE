@@ -1,7 +1,11 @@
 
-#ifndef BEENHERE
 #include "SDT.h"
-#endif
+
+int buttonRead = 0;
+int minPinRead = 1024;
+int secondaryMenuChoiceMade;
+void ButtonFineFreqIncrement();
+void ButtonCenterFreqIncrement();
 
 /*
 The button interrupt routine implements a first-order recursive filter, or "leaky integrator,"
@@ -43,6 +47,7 @@ static unsigned long buttonFilterRegister;
 static int buttonState, buttonADCPressed, buttonElapsed;
 static volatile int buttonADCOut;
 
+
 /*****
   Purpose: ISR to read button ADC and detect button presses
 
@@ -51,7 +56,6 @@ static volatile int buttonADCOut;
   Return value;
     void
 *****/
-
 void ButtonISR() {
   int filteredADCValue;
 
@@ -92,6 +96,7 @@ void ButtonISR() {
   }
 }
 
+
 /*****
   Purpose: Starts button IntervalTimer and toggles subsequent button
            functions into interrupt mode.
@@ -101,7 +106,6 @@ void ButtonISR() {
   Return value;
     void
 *****/
-
 void EnableButtonInterrupts() {
   buttonADCOut = BUTTON_OUTPUT_UP;
   buttonFilterRegister = buttonADCOut << BUTTON_FILTER_SHIFT;
@@ -111,6 +115,7 @@ void EnableButtonInterrupts() {
   buttonInterrupts.begin(ButtonISR, 1000000 / BUTTON_FILTER_SAMPLERATE);
   buttonInterruptsEnabled = true;
 }
+
 
 /*****
   Purpose: Determine which UI button was pressed
@@ -128,11 +133,6 @@ int ProcessButtonPress(int valPin) {
     return -1;
   }
 
-  if (valPin == MENU_OPTION_SELECT && menuStatus == NO_MENUS_ACTIVE) {
-    NoActiveMenu();
-    return -1;
-  }
-
   for (switchIndex = 0; switchIndex < NUMBER_OF_SWITCHES; switchIndex++) {
     if (abs(valPin - EEPROMData.switchValues[switchIndex]) < WIGGLE_ROOM)  // ...because ADC does return exact values every time
     {
@@ -142,6 +142,7 @@ int ProcessButtonPress(int valPin) {
 
   return -1;  // Really should never do this
 }
+
 
 /*****
   Purpose: Check for UI button press. If pressed, return the ADC value
@@ -182,10 +183,11 @@ int ReadSelectedPushButton() {
   }
   minPinRead = buttonRead;
   if (!buttonInterruptsEnabled) {
-    MyDelay(100L);
+    delay(100L);
   }
   return minPinRead;
 }
+
 
 /*****
   Purpose: Function is designed to route program control to the proper execution point in response to
@@ -198,36 +200,20 @@ int ReadSelectedPushButton() {
     void
 *****/
 void ExecuteButtonPress(int val) {
-  if (val == MENU_OPTION_SELECT && menuStatus == NO_MENUS_ACTIVE) {  // Pressed Select with no primary/secondary menu selected
-    NoActiveMenu();
-    return;
-  } else {
-    menuStatus = PRIMARY_MENU_ACTIVE;
-  }
-  //Serial.print("val = ");
-  //Serial.println(val);
+
   switch (val) {
     case MENU_OPTION_SELECT:  // 0
 
-      if (menuStatus == PRIMARY_MENU_ACTIVE) {  // Doing primary menu
-        ErasePrimaryMenu();
-        secondaryMenuChoiceMade = functionPtr[mainMenuIndex]();  // These are processed in MenuProcessing.cpp
-        menuStatus = SECONDARY_MENU_ACTIVE;
-        secondaryMenuIndex = -1;  // Reset secondary menu
-      } else {
-        if (menuStatus == SECONDARY_MENU_ACTIVE) {  // Doing primary menu
-          menuStatus = PRIMARY_MENU_ACTIVE;
-          mainMenuIndex = 0;
-        }
-      }
+      ShowMenu(&topMenus[mainMenuIndex], PRIMARY_MENU);
+      functionPtr[mainMenuIndex]();  // These are processed in MenuProcessing.cpp
       EraseMenus();
       break;
 
-    case MAIN_MENU_UP:                      // 1
-      ButtonMenuIncrease();                 // This makes sure the increment does go outta range
-      if (menuStatus != NO_MENUS_ACTIVE) {  // Doing primary menu
-        ShowMenu(&topMenus[mainMenuIndex], PRIMARY_MENU);
-      }
+    case MAIN_MENU_UP:       // 1
+      ButtonMenuIncrease();  // This makes sure the increment does go outta range
+                             //      if (menuStatus != NO_MENUS_ACTIVE) {  // Doing primary menu
+      ShowMenu(&topMenus[mainMenuIndex], PRIMARY_MENU);
+      //      }
       break;
 
     case BAND_UP:  // 2 Now calls ProcessIQData and Encoders calls
@@ -235,25 +221,23 @@ void ExecuteButtonPress(int val) {
       if (EEPROMData.currentBand < 5) digitalWrite(bandswitchPins[EEPROMData.currentBand], LOW);  // Added if so unused GPOs will not be touched.  KF5N October 16, 2023.
       ButtonBandIncrease();
       if (EEPROMData.currentBand < 5) digitalWrite(bandswitchPins[EEPROMData.currentBand], HIGH);
+      EEPROMData.rfGainCurrent = 10;
       BandInformation();
       NCOFreq = 0L;
       DrawBandWidthIndicatorBar();  // AFP 10-20-22
-      //FilterOverlay();   // AFP 10-20-22
       SetFreq();
       ShowSpectrum();
+      ShowAutoStatus();
       break;
 
     case ZOOM:  // 3
-      menuStatus = PRIMARY_MENU_ACTIVE;
       EraseMenus();
       ButtonZoom();
       break;
 
     case MAIN_MENU_DN:  // 4
       ButtonMenuDecrease();
-      if (menuStatus != NO_MENUS_ACTIVE) {  // Doing primary menu
-        ShowMenu(&topMenus[mainMenuIndex], PRIMARY_MENU);
-      }
+      ShowMenu(&topMenus[mainMenuIndex], PRIMARY_MENU);
       break;
 
     case BAND_DN:  // 5
@@ -265,7 +249,8 @@ void ExecuteButtonPress(int val) {
       BandInformation();
       NCOFreq = 0L;
       DrawBandWidthIndicatorBar();  //AFP 10-20-22
-      //FilterOverlay();            // AFP 10-20-22
+                                    //      EEPROMData.rfGainCurrent = 0;
+      ShowAutoStatus();
       break;
 
     case FILTER:  // 6
@@ -285,6 +270,7 @@ void ExecuteButtonPress(int val) {
 
     case NOISE_REDUCTION:  // 9
       ButtonNR();
+      UpdateNotchField();  // This is required because LMS NR must turn off AutoNotch.
       break;
 
     case NOTCH_FILTER:  // 10
@@ -297,7 +283,7 @@ void ExecuteButtonPress(int val) {
       break;
 
     case FINE_TUNE_INCREMENT:  // 12
-      UpdateIncrementField();
+      ButtonFineFreqIncrement();
       break;
 
     case DECODER_TOGGLE:  // 13
@@ -306,7 +292,7 @@ void ExecuteButtonPress(int val) {
       break;
 
     case MAIN_TUNE_INCREMENT:  // 14
-      ButtonFreqIncrement();
+      ButtonCenterFreqIncrement();
       break;
 
     case RESET_TUNING:  // 15   AFP 10-11-22
@@ -341,7 +327,7 @@ void ExecuteButtonPress(int val) {
       }
       while (true) {
         valPin = ReadSelectedPushButton();  // Poll UI push buttons
-        MyDelay(100L);
+        delay(100L);
         if (valPin != BOGUS_PIN_READ) {              // If a button was pushed...
           buttonIndex = ProcessButtonPress(valPin);  // Winner, winner...chicken dinner!
           switch (buttonIndex) {
@@ -354,9 +340,6 @@ void ExecuteButtonPress(int val) {
         }
 
         if (doneViewing == true) {
-          //tft.clearMemory();          // Need to clear overlay too
-          //tft.writeTo(L2);
-          //tft.fillWindow();
           break;
         }
       }
@@ -370,7 +353,7 @@ void ExecuteButtonPress(int val) {
 
 
 /*****
-  Purpose: To process a tuning increment button push
+  Purpose: To process a center tuning increment button push
 
   Parameter list:
     void
@@ -378,11 +361,43 @@ void ExecuteButtonPress(int val) {
   Return value:
     void
 *****/
-void ButtonFreqIncrement() {
-  EEPROMData.tuneIndex--;
-  if (EEPROMData.tuneIndex < 0)
-    EEPROMData.tuneIndex = MAX_FREQ_INDEX - 1;
-  EEPROMData.freqIncrement = incrementValues[EEPROMData.tuneIndex];
+std::vector<uint32_t>::iterator result;  // This is also used by fine tuning.  Greg KF5N June 29, 2024
+std::vector<uint32_t> centerTuneArray CENTER_TUNE_ARRAY;  // k3pto
+void ButtonCenterFreqIncrement() {
+  uint32_t index = 0;
+  // Find the index of the current fine tune setting.
+  result = std::find(centerTuneArray.begin(), centerTuneArray.end(), EEPROMData.centerTuneStep);
+  index = std::distance(centerTuneArray.begin(), result);
+  index++;                                // Increment index.
+  if (index == centerTuneArray.size()) {  // Wrap around.
+    index = 0;
+  }
+  EEPROMData.centerTuneStep = centerTuneArray[index];
+  DisplayIncrementField();
+}
+
+
+/*****
+  Purpose: To process a fine tuning increment button push
+
+  Parameter list:
+    void
+
+  Return value;
+    void
+*****/
+//std::vector<uint32_t>::iterator result;
+std::vector<uint32_t> fineTuneArray FINE_TUNE_ARRAY;  // K3PTO
+void ButtonFineFreqIncrement() {
+  uint32_t index = 0;
+  // Find the index of the current fine tune setting.
+  result = std::find(fineTuneArray.begin(), fineTuneArray.end(), EEPROMData.fineTuneStep);
+  index = std::distance(fineTuneArray.begin(), result);
+  index++;                              // Increment index.
+  if (index == fineTuneArray.size()) {  // Wrap around.
+    index = 0;
+  }
+  EEPROMData.fineTuneStep = fineTuneArray[index];
   DisplayIncrementField();
 }
 
@@ -395,14 +410,11 @@ void ButtonFreqIncrement() {
 
   Return value;
     void
-*****/
+*****
 void NoActiveMenu() {
   tft.setFontScale((enum RA8875tsize)1);
   tft.setTextColor(RA8875_RED);
   tft.setCursor(10, 0);
   tft.print("No menu selected");
-
-  menuStatus = NO_MENUS_ACTIVE;
-  mainMenuIndex = 0;
-  secondaryMenuIndex = 0;
 }
+*/

@@ -1,12 +1,61 @@
-#ifndef BEENHERE
+
 #include "SDT.h"
-#endif
-
-
 #define debug_alternate_NR
 #define boundary_blank 14                           //14 // for first trials very large!!!!
 #define impulse_length NB_impulse_samples           // 7 // has to be odd!!!! 7 / 3 should be enough
-#define PL             (impulse_length - 1) / 2     // 6 // 3 has to be (impulse_length-1)/2 !!!!
+#define PL (impulse_length - 1) / 2     // 6 // 3 has to be (impulse_length-1)/2 !!!!
+
+float knee_dBFS = -15.0;
+int8_t NB_taps = 10;
+int8_t NB_impulse_samples = 7;
+uint8_t decay_type = 0;
+uint8_t hang_enable;
+uint8_t NB_test = 0;
+int attack_buffsize;
+int hang_counter = 0;
+int n_tau;
+int out_index = -1;
+int pmode = 1;
+uint32_t in_index;
+long notchFreq = 1000;
+long notchCenterBin;
+float32_t abs_ring[RB_SIZE];
+float32_t attack_mult;
+float32_t abs_out_sample;
+float32_t decay_mult;
+float32_t fast_backaverage;
+float32_t fast_backmult;
+float32_t fast_decay_mult;
+float32_t fixed_gain = 1.0;
+float32_t hang_backaverage;
+float32_t hang_backmult;
+float32_t hang_decay_mult;
+float32_t hang_thresh;
+float32_t hang_level;
+float32_t hangtime;
+float32_t inv_max_input;
+float32_t inv_out_target;
+float32_t max_gain;
+float32_t max_input = -0.1;
+float32_t min_volts;
+float32_t NB_thresh = 2.5;
+float32_t onemfast_backmult;
+float32_t onemhang_backmult;
+float32_t out_sample[2];
+float32_t out_targ;
+float32_t out_target;
+float32_t pop_ratio;
+float32_t ring_max = 0.0;
+float32_t save_volts = 0.0;
+float32_t slope_constant;
+float32_t tau_attack;
+float32_t tau_decay;
+float32_t tau_fast_backaverage = 0.0;
+float32_t tau_fast_decay;
+float32_t tau_hang_backmult;
+float32_t tau_hang_decay;
+float32_t var_gain;
+float32_t volts = 0.0;
 
 /*****
   Purpose: Setup Teensy Mic Compressor
@@ -15,14 +64,14 @@
   Return value;
     void
 *****/
-void SetupMyCompressors(boolean use_HP_filter1, float knee_dBFS1, float comp_ratio1, float attack_sec1, float release_sec1) {
-  comp1.enableHPFilter(use_HP_filter1);   comp2.enableHPFilter(use_HP_filter1);
-  comp1.setThresh_dBFS(knee_dBFS1);       comp2.setThresh_dBFS(knee_dBFS1);
-  comp1.setCompressionRatio(comp_ratio1); comp2.setCompressionRatio(comp_ratio1);
+void SetupMyCompressors(bool use_HP_filter1, float knee_dBFS1, float comp_ratio1, float attack_sec1, float release_sec1) {
+  comp1.enableHPFilter(use_HP_filter1);   // comp2.enableHPFilter(use_HP_filter1);  Compressor2 not required as there is only 1 microphone channel.  KF5N March 11, 2024
+  comp1.setThresh_dBFS(knee_dBFS1);       // comp2.setThresh_dBFS(knee_dBFS1);
+  comp1.setCompressionRatio(comp_ratio1); // comp2.setCompressionRatio(comp_ratio1);
 
   float fs_Hz = AUDIO_SAMPLE_RATE;
-  comp1.setAttack_sec(attack_sec1, fs_Hz);       comp2.setAttack_sec(attack_sec1, fs_Hz);
-  comp1.setRelease_sec(release_sec1, fs_Hz);     comp2.setRelease_sec(release_sec1, fs_Hz);
+  comp1.setAttack_sec(attack_sec1, fs_Hz);     //  comp2.setAttack_sec(attack_sec1, fs_Hz);
+  comp1.setRelease_sec(release_sec1, fs_Hz);   //  comp2.setRelease_sec(release_sec1, fs_Hz);
 }
 
 
@@ -414,6 +463,8 @@ void AGCPrep()
 void AGCThresholdChanged() {
   max_gain = powf (10.0, (float32_t)bands[EEPROMData.currentBand].AGC_thresh / 20.0);
 }
+
+
 /*****
   Purpose: Audio AGC()
   Parameter list:
@@ -555,9 +606,9 @@ void AGC()
     }
     if (volts < min_volts) {
       volts = min_volts; // no AGC action is taking place
-      agc_action = 0;
+      agc_action = false;
     } else {
-      agc_action = 1;                           // LED indicator for AGC action
+      agc_action = true;                           // LED indicator for AGC action
     }
 
     //#ifdef USE_LOG10FAST
@@ -570,10 +621,8 @@ void AGC()
   }
 }
 
+
 // ========== AM-Decode stuff
-
-
-
 /*****
   Purpose: Demod IQ
   Parameter list:
@@ -587,7 +636,6 @@ void DecodeIQ() {
     float_buffer_R[i] = iFFT_buffer[FFT_length + i * 2 + 1];
   }
 }
-
 
 
 /*****
@@ -628,7 +676,7 @@ void SetCompressionLevel()
     }
     val = ReadSelectedPushButton();                                  // Read pin that controls all switches
     val = ProcessButtonPress(val);
-    MyDelay(150L);
+    delay(150L);
     if (val == MENU_OPTION_SELECT) {                             // Make a choice??
       // micCompression = EEPROMData.currentMicThreshold;
       //EEPROMData.EEPROMData.currentMicThreshold = EEPROMData.currentMicThreshold;
@@ -639,6 +687,7 @@ void SetCompressionLevel()
   }
   EraseMenus();
 }
+
 
 /*****
   Purpose: Allow user to set the mic compression ratio
@@ -678,7 +727,7 @@ void SetCompressionRatio()
 
     val = ReadSelectedPushButton();                                  // Read pin that controls all switches
     val = ProcessButtonPress(val);
-    MyDelay(150L);
+    delay(150L);
 
     if (val == MENU_OPTION_SELECT) {                             // Make a choice??
      // EEPROMData.EEPROMData.currentMicCompRatio = EEPROMData.currentMicCompRatio;
@@ -689,6 +738,8 @@ void SetCompressionRatio()
   }
   EraseMenus();
 }
+
+
 /*****
   Purpose: Allow user to set the mic Attack in sec
 
@@ -727,7 +778,7 @@ void SetCompressionAttack()
 
     val = ReadSelectedPushButton();                                  // Read pin that controls all switches
     val = ProcessButtonPress(val);
-    MyDelay(150L);
+    delay(150L);
 
     if (val == MENU_OPTION_SELECT) {                             // Make a choice??
       //EEPROMData.EEPROMData.currentMicAttack = EEPROMData.currentMicAttack;
@@ -738,6 +789,7 @@ void SetCompressionAttack()
   }
   EraseMenus();
 }
+
 
 /*****
   Purpose: Allow user to set the mic compression ratio
@@ -777,7 +829,7 @@ void SetCompressionRelease()
 
     val = ReadSelectedPushButton();                                  // Read pin that controls all switches
     val = ProcessButtonPress(val);
-    MyDelay(150L);
+    delay(150L);
 
     if (val == MENU_OPTION_SELECT) {                             // Make a choice??
       //EEPROMData.EEPROMData.currentMicCompRatio = EEPROMData.currentMicCompRatio;

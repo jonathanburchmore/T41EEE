@@ -1,22 +1,9 @@
-#ifndef BEENHERE
+
 #include "SDT.h"
-#endif
-/*
-  #define SD_CS                       BUILTIN_SDCARD        // Works on T_3.6 and T_4.1 ...
 
-  #define MY_LON                      -84.42676671875002
-  #define MY_LAT                      39.074660204008886
-  #define CENTER_SCREEN_X             387
-  #define CENTER_SCREEN_Y             240
-  #define IMAGE_CORNER_X              211 // ImageWidth = 378 Therefore 800 - 378 = 422 / 2 = 211
-  #define IMAGE_CORNER_Y              89  // ImageHeight = 302 Therefore 480 - 302 = 178 / 2 = 89
-  #define RAY_LENGTH                  190
-  #define BUFFPIXEL                   20  // Use buffer to read image rather than 1 pixel at a time
+const char DEGREE_SYMBOL[] = { 0xB0, '\0' };
+int countryIndex = -1;
 
-  #define DEGREES2RADIANS             0.01745329
-  #define RADIANS2DEGREES             57.29578
-  #define PI_BY_180                   0.01745329
-*/
 enum { SCL_HALF = 0,
        SCL_QUARTER,
        SCL_EIGHTH,
@@ -28,9 +15,7 @@ typedef struct {
   int *key_value_addr;
 } key_name_value_t;
 
-
 uint8_t sdbuffer[3 * BUFFPIXEL];  // pixel buffer (R+G+B per pixel)
-
 
 int g_background_color = RA8875_BLACK;
 int g_debug_output = 0;
@@ -71,16 +56,16 @@ inline void writeClippedRect(int16_t x, int16_t y, int16_t cx, int16_t cy, uint1
 void writeClippedRect(int x, int y, int cx, int cy, uint16_t *pixels, bool waitForWRC = true);
 #endif
 
-char letters[] = { '\0',  // Make a 1's-based array
+PROGMEM char letters[] = { '\0',  // Make a 1's-based array
                    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I',
                    'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',
                    'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '*',  // Space is for SP
                    '0', '1', '2', '3', '4', '5', '6', '7', '8',
                    '9' };
 
-int spacing[] = { 0, 70, 140, 210, 280, 350, 420, 490, 560, 630 };
+PROGMEM int spacing[] = { 0, 70, 140, 210, 280, 350, 420, 490, 560, 630 };
 
-struct cities {
+ struct cities {
   char callPrefix[12];
   char country[30];
   double lat;
@@ -554,7 +539,7 @@ PROGMEM struct cities dxCities[] = {
   Return value:
     void
 *****/
-void DrawKeyboard() {
+FLASHMEM void DrawKeyboard() {
   int i;
   int keyWidth = 60;
   int keySpace = 10;
@@ -574,7 +559,7 @@ void DrawKeyboard() {
   tft.drawRect(30, 150, 730, 280, RA8875_WHITE);  // Draw frame
   tft.setTextColor(RA8875_WHITE, RA8875_BLACK);
 
-  MyDelay(100L);
+  delay(100L);
   row = 160;
   xOffset = 50;
   keyCell = 0;
@@ -652,7 +637,7 @@ void DrawKeyboard() {
   Return value:
     void
 *****/
-void CaptureKeystrokes() {
+FLASHMEM void CaptureKeystrokes() {
   int keyWidth = 60;
   int keySpace = 10;
   int keyHeight = 40;
@@ -676,12 +661,12 @@ void CaptureKeystrokes() {
   DrawActiveLetter(row, spacing[keyCell], whichLetterIndex, keyWidth, keyHeight);
   while (true) {
     valPin = ReadSelectedPushButton();  // Poll UI push buttons
-    MyDelay(150L);
+    delay(150L);
     if (valPin != BOGUS_PIN_READ) {                        // If a button was pushed...
       pushButtonSwitchIndex = ProcessButtonPress(valPin);  // Winner, winner...chicken dinner!
       switch (pushButtonSwitchIndex) {
         case MENU_OPTION_SELECT:  // They selected a letter
-          MyDelay(150L);
+          delay(150L);
           if (row < 240) {
             keyboardBuffer[bufferIndex] = whichLetterIndex;
           } else {
@@ -697,7 +682,7 @@ void CaptureKeystrokes() {
           if (row <= 155)   // Trying to go up above numerics
             break;
           DrawNormalLetter(row, spacing[keyCell], whichLetterIndex, keyWidth, keyHeight);
-          MyDelay(150L);
+          delay(150L);
           row -= 60;
           if (row < 240) {          // Move up to number line
             whichLetterIndex = 53;  // Move to 5
@@ -846,7 +831,7 @@ void CaptureKeystrokes() {
   Return value:
     void
 *****/
-void DrawNormalLetter(int row, int horizontalSpacer, int whichLetterIndex, int keyWidth, int keyHeight) {
+FLASHMEM void DrawNormalLetter(int row, int horizontalSpacer, int whichLetterIndex, int keyWidth, int keyHeight) {
   tft.setTextColor(RA8875_WHITE, RA8875_BLACK);
   tft.fillRect(horizontalSpacer, row + 5, keyWidth, keyHeight, RA8875_BLACK);
   tft.drawRect(horizontalSpacer, row + 5, keyWidth, keyHeight, RA8875_YELLOW);
@@ -878,7 +863,7 @@ void DrawNormalLetter(int row, int horizontalSpacer, int whichLetterIndex, int k
   Return value:
     void
 *****/
-void DrawActiveLetter(int row, int horizontalSpacer, int whichLetterIndex, int keyWidth, int keyHeight) {
+FLASHMEM void DrawActiveLetter(int row, int horizontalSpacer, int whichLetterIndex, int keyWidth, int keyHeight) {
   tft.setTextColor(RA8875_WHITE, RA8875_BLACK);
   tft.fillRect(horizontalSpacer, row + 5, keyWidth, keyHeight, RA8875_BLUE);
   if (letters[whichLetterIndex] == '*') {  // Space
@@ -906,7 +891,7 @@ void DrawActiveLetter(int row, int horizontalSpacer, int whichLetterIndex, int k
     double               the bearing heading to DX in degrees
 
  *****/
-float BearingHeading(char *dxCallPrefix) {
+FLASHMEM float BearingHeading(char *dxCallPrefix) {
   float deltaLong;  // For radians conversion
   float x, y;       // Temporary variables
 
@@ -951,7 +936,7 @@ float BearingHeading(char *dxCallPrefix) {
     int                  the index of the country, -1 if not found
 
  *****/
-int FindCountry(char *prefix) {
+FLASHMEM int FindCountry(char *prefix) {
   // callPrefix country  lat  lon
   int i = 0,
       index = -1,
@@ -995,7 +980,7 @@ int FindCountry(char *prefix) {
 
 From: https://stackoverflow.com/questions/27928/calculate-distance-between-two-latitude-longitude-points-haversine-formula
 *****/
-float HaversineDistance(float lat2, float lon2) {
+FLASHMEM float HaversineDistance(float lat2, float lon2) {
   const float r = 6371;  // Earth's radius in km
   const float p = PI_BY_180;
   float lat1, lon1;
@@ -1011,7 +996,7 @@ float HaversineDistance(float lat2, float lon2) {
 //======================================
 
 
-void bmpDraw(const char *filename, int x, int y) {
+FLASHMEM void bmpDraw(const char *filename, int x, int y) {
   //  int image_width, image_height;        // W+H in pixels
   int len;
   int rayStart = 0, rayEnd = 0;
@@ -1023,8 +1008,8 @@ void bmpDraw(const char *filename, int x, int y) {
   uint8_t sdbuffer[3 * BUFFPIXEL];     // pixel in buffer (R+G+B per pixel)
   uint16_t lcdbuffer[BUFFPIXEL];       // pixel out buffer (16-bit per pixel)
   uint8_t buffidx = sizeof(sdbuffer);  // Current position in sdbuffer
-  boolean goodBmp = false;             // Set to true on valid header parse
-  boolean flip = true;                 // BMP is stored bottom-to-top
+  bool goodBmp = false;             // Set to true on valid header parse
+  bool flip = true;                 // BMP is stored bottom-to-top
   int w, h, row, col, xpos, ypos;
 
   homeLat = myMapFiles[selectedMapIndex].lat;
@@ -1044,7 +1029,7 @@ void bmpDraw(const char *filename, int x, int y) {
 
   if (!SD.begin(chipSelect)) {
     tft.print("SD card cannot be initialized.");
-    MyDelay(2000L);  // Given them time to read it.
+    delay(2000L);  // Given them time to read it.
     return;
   }
   // Open requested file on SD card
@@ -1288,7 +1273,7 @@ inline void writeRect(int x, int y, int cx, int cy, uint16_t *pixels) {
 #endif
 }
 
-void writeClippedRect(int x, int y, int cx, int cy, uint16_t *pixels, bool waitForWRC) {
+FLASHMEM void writeClippedRect(int x, int y, int cx, int cy, uint16_t *pixels, bool waitForWRC) {
   x += g_image_offset_x;
   y += g_image_offset_y;
   int end_x = x + cx;
@@ -1394,12 +1379,10 @@ int InitializeSDCard() {
   tft.setCursor(100, 240);
   if (!SD.begin(chipSelect)) {
     tft.print("SD card cannot be initialized.");
-    MyDelay(2000L);  // Given them time to read it.
+    delay(2000L);  // Given them time to read it.
     return 0;
   }
 
-  //  tft.print("Initializing SD card.");
-  //  MyDelay(2000L);
   return 1;
 }
 
@@ -1436,7 +1419,7 @@ void WaitforWRComplete() {
   Return value;
     int                   0 if cannot initialize, 1 otherwise
 *****/
-int BearingMaps() {
+FLASHMEM void BearingMaps() {
   char ptrMaps[10][50];
   int count;
 
@@ -1444,10 +1427,10 @@ int BearingMaps() {
     tft.setCursor(200, 300);
     tft.setTextColor(RA8875_RED, RA8875_BLACK);
     tft.println("No SD card.");
-    MyDelay(SDCARD_MESSAGE_LENGTH);
+    delay(SDCARD_MESSAGE_LENGTH);
     tft.fillRect(200, 300, tft.getFontWidth() * 12, tft.getFontHeight(), RA8875_BLACK);
     tft.setTextColor(RA8875_WHITE, RA8875_BLACK);
-    return 0;
+//    return 0;
   }
   count = CreateMapList(ptrMaps, &count);  // Reads the SD card for BMP files and returns ptrMaps filled in with names and return the count
 
@@ -1455,7 +1438,7 @@ int BearingMaps() {
     tft.setCursor(300, 300);
     tft.print("No Maps found");
     selectedMapIndex = -1;
-    return -1;  // Didn't find any
+//    return -1;  // Didn't find any
   }
   if (count == 1) {
     selectedMapIndex = 0;
@@ -1475,9 +1458,9 @@ int BearingMaps() {
       tft.setCursor(200, 200);
       tft.setTextColor(RA8875_RED, RA8875_BLACK);
       tft.println("initialization failed!");
-      MyDelay(5000L);
+      delay(5000L);
       tft.setTextColor(RA8875_WHITE, RA8875_BLACK);
-      return -1;
+//      return -1;
     }
     selectedMapIndex = WhichOneToUse(ptrMaps, count);
   }
@@ -1490,7 +1473,7 @@ int BearingMaps() {
   ShowFrequency();
   DrawFrequencyBarValue();
 
-  return selectedMapIndex;
+//  return selectedMapIndex;
 }
 
 
@@ -1504,7 +1487,7 @@ int BearingMaps() {
   Return value;
     int                   0 if cannot initialize, 1 otherwise
 *****/
-int CreateMapList(char ptrMaps[][50], int *count) {
+FLASHMEM int CreateMapList(char ptrMaps[][50], int *count) {
   int index;
   int temp = 0;
 
@@ -1547,7 +1530,7 @@ int WhichOneToUse(char ptrMaps[][50], int count) {
   int i;
   int val;
 
-  MyDelay(100L);
+  delay(100L);
   for (i = 0; i < count; i++) {  // Yep.
     tft.setCursor(50, 55 + i * 30);
     tft.print(ptrMaps[i]);
@@ -1577,7 +1560,7 @@ int WhichOneToUse(char ptrMaps[][50], int count) {
     }
     val = ReadSelectedPushButton();  // Read pin that controls all switches
     val = ProcessButtonPress(val);
-    MyDelay(100L);
+    delay(100L);
     if (val == MENU_OPTION_SELECT) {  // Make a choice??
       break;                          // Yep.
     }
