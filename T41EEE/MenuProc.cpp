@@ -1,11 +1,51 @@
+// Calibrate Options
+// CW Options
+// Spectrum Options
+// AGC Options
+// Receive Equalizer Options
+// SSB Options
+// RF Options
+// EEPROM Options
 
 #include "SDT.h"
 
-int micChoice;
-int micGainChoice;
+int micChoice = 0;
 int splitOn = 0;
 
-// Updates by KF5N to CalibrateOptions() function. July 20, 2023
+
+#include "SDT.h"
+
+/*****
+  Purpose: void ShowMenu()
+
+  Parameter list:
+    char *menuItem          pointers to the menu
+    int where               0 is a primary menu, 1 is a secondary menu
+
+  Return value;
+    void
+*****/
+void ShowMenu(const char *menu[], int where)
+{
+  tft.setFontScale( (enum RA8875tsize) 1);  
+//     NoActiveMenu();  // Does this erase only?
+     
+  if (where == PRIMARY_MENU) {                                              // Should print on left edge of top line
+    tft.fillRect(PRIMARY_MENU_X, MENUS_Y, 300, CHAR_HEIGHT, RA8875_BLUE);   // Top-left of display
+    tft.setCursor(5, 0);
+    tft.setTextColor(RA8875_WHITE);
+    tft.print(*menu);                                                       // Primary Menu
+  } else {
+    tft.fillRect(SECONDARY_MENU_X, MENUS_Y, 300, CHAR_HEIGHT, RA8875_GREEN);// Right of primary display
+    tft.setCursor(35, 0);
+    tft.setTextColor(RA8875_WHITE);
+    tft.print(*menu);                                                       // Secondary Menu
+  }
+  return;
+}
+
+
+// Updates by KF5N to CalibrateOptions() function.  Added SSB Carrier and SSB Transmit cal.  Greg KF5N July 10, 2024
 // Updated receive calibration code to clean up graphics.  KF5N August 3, 2023
 // ==============  AFP 10-22-22 ==================
 /*****
@@ -27,8 +67,8 @@ void CalibrateOptions() {
 
   // Select the type of calibration, and then skip this during the loop() function.
   if (calibrateFlag == 0) {
-    const char *IQOptions[13]{ "Freq Cal", "CW PA Cal", "Rec Cal", "Carrier Cal", "Xmit Cal", "SSB PA Cal", "Radio Cal", "Refine Cal", "Set Tone", "DAC Offset", "Btn Cal", "Btn Repeat", "Cancel" };  //AFP 10-21-22
-    IQChoice = SubmenuSelect(IQOptions, 13, 0);                                                                                                                                                        //AFP 10-21-22
+    const char *IQOptions[18]{ "Freq Cal", "CW PA Cal", "Rec Cal", "CW Carrier Cal", "CW Xmit Cal", "SSB PA Cal", "SSB Carrier Cal", "SSB Transmit Cal", "CW Radio Cal", "CW Refine Cal", "SSB Radio Cal", "SSB Refine Cal", "CW Cal Tone", "DAC Offset CW", "DAC Offset SSB", "Btn Cal", "Btn Repeat", "Cancel" };  //AFP 10-21-22
+    IQChoice = SubmenuSelect(IQOptions, 18, 0);                                                                                                                                                                                                                                                                      //AFP 10-21-22
   }
   calibrateFlag = 1;
   switch (IQChoice) {
@@ -63,7 +103,8 @@ void CalibrateOptions() {
         }
       }
       break;
-    case 2:                              // IQ Receive Cal - Gain and Phase
+
+    case 2:                                         // IQ Receive Cal - Gain and Phase
       calibrater.DoReceiveCalibrate(false, false);  // This function was significantly revised.  KF5N August 16, 2023
       break;
 
@@ -71,7 +112,7 @@ void CalibrateOptions() {
       calibrater.DoXmitCarrierCalibrate(EEPROMData.calFreq, false, false);
       break;
 
-    case 4:                                               // IQ Transmit Cal - Gain and Phase  //AFP 2-21-23
+    case 4:                                                          // IQ Transmit Cal - Gain and Phase  //AFP 2-21-23
       calibrater.DoXmitCalibrate(EEPROMData.calFreq, false, false);  // This function was significantly revised.  KF5N August 16, 2023
       break;
 
@@ -90,23 +131,42 @@ void CalibrateOptions() {
       }
       break;  // Missing break.  KF5N August 12, 2023
 
-    case 6:  // Fully automatic radio calibration.
+
+    case 6:  // SSB Carrier Cal
+      ssbcalibrater.DoXmitCarrierCalibrate(EEPROMData.calFreq, false, false);
+      break;
+
+    case 7:                                                             // SSB Transmit cal
+      ssbcalibrater.DoXmitCalibrate(EEPROMData.calFreq, false, false);  // This function was significantly revised.  KF5N August 16, 2023
+      break;
+
+    case 8:  // Fully automatic radio calibration.
       calibrater.RadioCal(false);
       calibrateFlag = 0;
       break;
 
-    case 7:  // Full automatic calibration refinement.
+    case 9:  // Full automatic calibration refinement.
       calibrater.RadioCal(true);
       calibrateFlag = 0;
       break;
 
-    case 8:  // Choose CW calibration tone frequency.
+    case 10:  // Fully automatic radio calibration.
+      ssbcalibrater.RadioCal(false);
+      calibrateFlag = 0;
+      break;
+
+    case 11:  // Full automatic calibration refinement.
+      ssbcalibrater.RadioCal(true);
+      calibrateFlag = 0;
+      break;
+
+    case 12:  // Choose CW calibration tone frequency.
       calibrater.SelectCalFreq();
       calibrateFlag = 0;
       break;
 
-    case 9:  // Set DAC offset for carrier cancellation.
-      EEPROMData.dacOffset = GetEncoderValueLiveQ15t(-5000, 5000, EEPROMData.dacOffset, 50, (char *)"DAC Offset:", false);
+    case 13:  // Set DAC offset for CW carrier cancellation.
+      EEPROMData.dacOffsetCW = GetEncoderValueLiveQ15t(-5000, 5000, EEPROMData.dacOffsetCW, 50, (char *)"DC Offset:", false);
       val = ReadSelectedPushButton();
       if (val != BOGUS_PIN_READ) {
         val = ProcessButtonPress(val);
@@ -118,7 +178,20 @@ void CalibrateOptions() {
       }
       break;
 
-    case 10:  // Calibrate buttons
+    case 14:  // Set DAC offset for SSB carrier cancellation.
+      EEPROMData.dacOffsetSSB = GetEncoderValueLiveQ15t(-5000, 5000, EEPROMData.dacOffsetSSB, 50, (char *)"DC Offset:", false);
+      val = ReadSelectedPushButton();
+      if (val != BOGUS_PIN_READ) {
+        val = ProcessButtonPress(val);
+        if (val == MENU_OPTION_SELECT) {
+          tft.fillRect(SECONDARY_MENU_X, MENUS_Y, EACH_MENU_WIDTH + 35, CHAR_HEIGHT, RA8875_BLACK);
+          EEPROMWrite();
+          calibrateFlag = 0;
+        }
+      }
+      break;
+
+    case 15:  // Calibrate buttons
       SaveAnalogSwitchValues();
       calibrateFlag = 0;
       RedrawDisplayScreen();
@@ -126,7 +199,7 @@ void CalibrateOptions() {
       DrawFrequencyBarValue();
       break;
 
-    case 11:  // Set button repeat rate
+    case 16:  // Set button repeat rate
       EEPROMData.buttonRepeatDelay = 1000 * GetEncoderValueLive(0, 5000, EEPROMData.buttonRepeatDelay / 1000, 1, (char *)"Btn Repeat:  ", false);
       val = ReadSelectedPushButton();
       if (val != BOGUS_PIN_READ) {
@@ -139,7 +212,7 @@ void CalibrateOptions() {
       }
       break;
 
-    case 12:  // Cancelled choice
+    case 17:  // Cancelled choice
       RedrawDisplayScreen();
       currentFreq = TxRxFreq = EEPROMData.centerFreq + NCOFreq;
       DrawBandWidthIndicatorBar();  // AFP 10-20-22
@@ -164,8 +237,8 @@ void CalibrateOptions() {
 
   // Select the type of calibration, and then skip this during the loop() function.
   if (calibrateFlag == 0) {
-    const char *IQOptions[11]{ "Freq Cal", "CW PA Cal", "Rec Cal", "Xmit Cal", "SSB PA Cal", "Radio Cal", "Refine Cal", "Set Tone", "Btn Cal", "Btn Repeat", "Cancel" };  //AFP 10-21-22
-    IQChoice = SubmenuSelect(IQOptions, 11, 0);                                                                                                                           //AFP 10-21-22
+    const char *IQOptions[14]{ "Freq Cal", "CW PA Cal", "Rec Cal", "CW Xmit Cal", "SSB PA Cal", "SSB Transmit Cal", "CW Radio Cal", "CW Refine Cal", "SSB Radio Cal", "SSB Refine Cal", "CW Cal Tone", "Btn Cal", "Btn Repeat", "Cancel" };  //AFP 10-21-22
+    IQChoice = SubmenuSelect(IQOptions, 14, 0);                                                                                                                                                                                                                                                                      //AFP 10-21-22
   }
   calibrateFlag = 1;
   switch (IQChoice) {
@@ -200,11 +273,12 @@ void CalibrateOptions() {
         }
       }
       break;
-    case 2:                              // IQ Receive Cal - Gain and Phase
+
+    case 2:                                         // IQ Receive Cal - Gain and Phase
       calibrater.DoReceiveCalibrate(false, false);  // This function was significantly revised.  KF5N August 16, 2023
       break;
 
-    case 3:                                               // IQ Transmit Cal - Gain and Phase  //AFP 2-21-23
+    case 3:                                                          // IQ Transmit Cal - Gain and Phase  //AFP 2-21-23
       calibrater.DoXmitCalibrate(EEPROMData.calFreq, false, false);  // This function was significantly revised.  KF5N August 16, 2023
       break;
 
@@ -223,22 +297,36 @@ void CalibrateOptions() {
       }
       break;  // Missing break.  KF5N August 12, 2023
 
-    case 5:  // Fully automatic radio calibration.
+    case 5:
+      ssbcalibrater.DoXmitCalibrate(EEPROMData.calFreq, false, false);  // SSB Transmit cal
+      break;
+
+    case 6:  // Fully automatic radio calibration.
       calibrater.RadioCal(false);
       calibrateFlag = 0;
       break;
 
-    case 6:  // Full automatic calibration refinement.
+    case 7:  // Full automatic calibration refinement.
       calibrater.RadioCal(true);
       calibrateFlag = 0;
       break;
 
-    case 7:  // Choose CW calibration tone frequency.
+    case 8:  // Fully automatic radio calibration.
+      ssbcalibrater.RadioCal(false);
+      calibrateFlag = 0;
+      break;
+
+    case 9:  // Full automatic calibration refinement.
+      ssbcalibrater.RadioCal(true);
+      calibrateFlag = 0;
+      break;
+
+    case 10:  // Choose CW calibration tone frequency.
       calibrater.SelectCalFreq();
       calibrateFlag = 0;
       break;
 
-    case 8:  // Calibrate buttons
+    case 11:  // Calibrate buttons
       SaveAnalogSwitchValues();
       calibrateFlag = 0;
       RedrawDisplayScreen();
@@ -246,7 +334,7 @@ void CalibrateOptions() {
       DrawFrequencyBarValue();
       break;
 
-    case 9:  // Set button repeat rate
+    case 12:  // Set button repeat rate
       EEPROMData.buttonRepeatDelay = 1000 * GetEncoderValueLive(0, 5000, EEPROMData.buttonRepeatDelay / 1000, 1, (char *)"Btn Repeat:  ", false);
       val = ReadSelectedPushButton();
       if (val != BOGUS_PIN_READ) {
@@ -259,13 +347,15 @@ void CalibrateOptions() {
       }
       break;
 
-    case 10:  // Cancelled choice
+    case 13:  // Cancelled choice
       RedrawDisplayScreen();
       currentFreq = TxRxFreq = EEPROMData.centerFreq + NCOFreq;
       DrawBandWidthIndicatorBar();  // AFP 10-20-22
       ShowFrequency();
       BandInformation();
       calibrateFlag = 0;
+      //      modeSelectOutExL.gain(0, 0);
+      //      modeSelectOutExR.gain(0, 0);
       break;
 
     default:
@@ -344,7 +434,7 @@ void SpectrumOptions() { /*
   dispSc displayScale[] =  //r *dbText,dBScale, baseOffset
   {
     {"20 dB/", 10.0, 24},
-    {"10 dB/", 20.0, 10}
+    {"10 dB/", 20.0, 10},  // JJP 7/14/23
   };
   */
   const char *spectrumChoices[] = { "20 dB/unit", "10 dB/unit", "Cancel" };
@@ -576,7 +666,7 @@ void EqualizerRecOptions() {
 
   Return value
     int           an index into the band array
-*****/
+*****
 void EqualizerXmtOptions() {
   const char *XmtEQChoices[] = { "TX EQ On", "TX EQ Off", "TX EQSet", "Cancel" };  // Add code practice oscillator
   int EQChoice = 0;
@@ -601,10 +691,11 @@ void EqualizerXmtOptions() {
   UpdateEqualizerField(EEPROMData.receiveEQFlag, EEPROMData.xmitEQFlag);
   //  return 0;
 }
+*/
 
 
 /*****
-  Purpose: Set Mic level
+  Purpose: Set options for the SSB exciter.
 
   Parameter list:
     void
@@ -612,84 +703,63 @@ void EqualizerXmtOptions() {
   Return value
     int           an index into the band array
 *****/
-void MicGainSet() {
-  //=====
-  const char *micGainChoices[] = { "Set Mic Gain", "Cancel" };
-  micGainChoice = SubmenuSelect(micGainChoices, 2, micGainChoice);
-  switch (micGainChoice) {
-    case 0:
-      int val;
-      tft.setFontScale((enum RA8875tsize)1);
-      tft.fillRect(SECONDARY_MENU_X - 50, MENUS_Y, EACH_MENU_WIDTH + 50, CHAR_HEIGHT, RA8875_MAGENTA);
-      tft.setTextColor(RA8875_WHITE);
-      tft.setCursor(SECONDARY_MENU_X - 48, MENUS_Y + 1);
-      tft.print("Mic Gain:");
-      tft.setCursor(SECONDARY_MENU_X + 180, MENUS_Y + 1);
-      tft.print(EEPROMData.currentMicGain);
-      while (true) {
-        if (filterEncoderMove != 0) {
-          EEPROMData.currentMicGain += ((float)filterEncoderMove);
-          if (EEPROMData.currentMicGain < -40)
-            EEPROMData.currentMicGain = -40;
-          else if (EEPROMData.currentMicGain > 30)  // 100% max
-            EEPROMData.currentMicGain = 30;
-          tft.fillRect(SECONDARY_MENU_X + 180, MENUS_Y, 80, CHAR_HEIGHT, RA8875_MAGENTA);
-          tft.setCursor(SECONDARY_MENU_X + 180, MENUS_Y + 1);
-          tft.print(EEPROMData.currentMicGain);
-          filterEncoderMove = 0;
-        }
-        val = ReadSelectedPushButton();  // Read pin that controls all switches
-        val = ProcessButtonPress(val);
-        if (val == MENU_OPTION_SELECT) {  // Make a choice??
-          EEPROMWrite();
-          break;
-        }
-      }
-    case 1:
-      break;
-  }
-}
-
-
-/*****
-  Purpose: Turn mic compression on and set the level
-
-  Parameter list:
-    void
-
-  Return value
-    int           an index into the band array
-*****/
-void MicOptions()  // AFP 09-22-22 All new
+void SSBOptions()  // AFP 09-22-22 All new
 {
-  const char *micChoices[] = { "Mic Comp On", "Mic Comp Off", "Set Threshold", "Set Comp_Ratio", "Set Attack", "Set Decay", "Cancel" };
+  int micChoice = 0;
+  //  const char *micChoices[] = { "Mic Comp On", "Mic Comp Off", "Set Threshold", "Set Comp_Ratio", "Set Attack", "Set Decay", "Cancel" };
+  const char *micChoices[] = { "CESSB", "SSB Data", "Comp On", "Comp Off", "Mic Gain", "Comp Threshold", "Comp Ratio", "Cancel" };
 
-  micChoice = SubmenuSelect(micChoices, 7, micChoice);
+  micChoice = SubmenuSelect(micChoices, 8, micChoice);
   switch (micChoice) {
-    case 0:                           // On
-      EEPROMData.compressorFlag = 1;  // AFP 09-22-22
-      UpdateCompressionField();       // JJP 8/26/2023
+
+    case 0:  // CESSB on
+    EEPROMData.cessb = true;
+    cessb1.setProcessing(EEPROMData.cessb);
+    Serial.printf("processing = %d", cessb1.getProcessing());
+    EEPROMWrite();
+    BandInformation();
       break;
-    case 1:  // Off
-      EEPROMData.compressorFlag = 0;
-      UpdateCompressionField();  // JJP 8/26/2023
+
+    case 1:  // SSB Data on
+    EEPROMData.cessb = false;
+    cessb1.setProcessing(EEPROMData.cessb);
+    Serial.printf("processing = %d", cessb1.getProcessing());
+    EEPROMWrite();
+    BandInformation();
       break;
-    case 2:
-      SetCompressionLevel();
+
+    case 2:  // Compressor On
+    EEPROMData.compressorFlag = true;
+    UpdateCompressionField();
+    EEPROMWrite();
+    break;
+
+    case 3:  // Compressor Off
+    EEPROMData.compressorFlag = false;
+    UpdateCompressionField();
+    EEPROMWrite();
+    break;
+
+    case 4:  // Adjust mic gain in dB.  Default 0 db.
+      MicGainSet();
       break;
-    case 3:
+
+    case 5:  // Set compression ratio.  Default -10 dB.
+      SetCompressionThreshold();
+      UpdateCompressionField();
+      break;
+
+    case 6:  // Set compressor threshold.  Default 100.0.
       SetCompressionRatio();
+      UpdateCompressionField();
       break;
-    case 4:
-      SetCompressionAttack();
+
+    case 7:  // Cancel
+      return;
       break;
-    case 5:
-      SetCompressionRelease();
-      break;
-    case 6:
-      break;
-    default:  // Cancelled choice
-      micChoice = -1;
+
+    default:
+      return;
       break;
   }
 }
@@ -739,21 +809,21 @@ void RFOptions() {
       EEPROMWrite();
       break;
 
-      case 4: // Auto-Spectrum On
+    case 4:  // Auto-Spectrum On
       EEPROMData.autoSpectrum = true;
       EEPROMData.autoGain = false;  // Make sure Auto-Gain is off.
       ShowAutoStatus();
       EEPROMWrite();
       break;
 
-      case 5: // Auto-Spectrum Off
+    case 5:  // Auto-Spectrum Off
       EEPROMData.autoSpectrum = false;
       fftOffset = 0;
       ShowAutoStatus();
       EEPROMWrite();
       break;
 
-      default:  // Cancel
+    default:  // Cancel
       break;
   }
 }
@@ -878,7 +948,7 @@ void VFOSelect() {
   // Draw or not draw CW filter graphics to audio spectrum area.  KF5N July 30, 2023
   tft.writeTo(L2);
   tft.clearMemory();
-  if (EEPROMData.xmtMode == CW_MODE) BandInformation();
+  if (EEPROMData.xmtMode == RadioMode::CW_MODE) BandInformation();
   DrawBandWidthIndicatorBar();
   DrawFrequencyBarValue();
   UpdateDecoderField();
@@ -979,17 +1049,6 @@ void EEPROMOptions() {  // 0               1                2               3   
 
   Return value
     int           an index into the band array
-const char *topMenus[] = { "Bearing", "CW Options", "RF Set", "VFO Select",
-                           "EEPROM", "AGC", "Spectrum Options",
-                           "Noise Floor", "Mic Gain", "Mic Comp",
-                           "EQ Rec Set", "EQ Xmt Set", "Calibrate" };
-
-int (*functionPtr[])() = { &BearingMaps, &CWOptions, &RFOptions, &VFOSelect,
-                           &EEPROMOptions, &AGCOptions, &SpectrumOptions,
-                           &ButtonSetNoiseFloor, &MicGainSet, &MicOptions,
-                           &EqualizerRecOptions, &EqualizerXmtOptions, &IQOptions
-
-};
 *****/
 int SubmenuSelect(const char *options[], int numberOfChoices, int defaultStart) {
   int refreshFlag = 0;

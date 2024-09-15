@@ -2,7 +2,7 @@
 
 //======================================== User section that might need to be changed ===================================
 #include "MyConfigurationFile.h"  // This file name should remain unchanged
-#define VERSION "T41EEE.6"        // Change this for updates. If you make this longer than 9 characters, brace yourself for surprises.  Use quotes!
+#define VERSION "T41EEE.7"        // Change this for updates. If you make this longer than 9 characters, brace yourself for surprises.  Use quotes!
 
 struct maps {
   char mapNames[50];
@@ -21,7 +21,7 @@ extern struct maps myMapFiles[];
 #include <Audio.h>                     //https://github.com/chipaudette/OpenAudio_ArduinoLibrary
 #include <OpenAudio_ArduinoLibrary.h>  // AFP 11-01-22
 #include <TimeLib.h>                   // Part of Teensy Time library
-#include <Wire.h>
+//#include <Wire.h>    // Not required?
 #include <SPI.h>
 #include <SD.h>
 #include <Metro.h>
@@ -41,12 +41,13 @@ extern struct maps myMapFiles[];
 #include <vector>
 #include <algorithm>
 
-#include "Calibrate.h"
+#include "CWCalibrate.h"
+#include "SSBCalibrate.h"
 
 //======================================== Symbolic Constants for the T41 ===================================================
 #define RIGNAME "T41-EP SDT"
 #define NUMBER_OF_SWITCHES 18  // Number of push button switches. 16 on older boards
-#define TOP_MENU_COUNT 13      // Menus to process AFP 09-27-22, JJP 7-8-23
+
 #define RIGNAME_X_OFFSET 570   // Pixel count to rig name field
 #define RA8875_DISPLAY 1       // Comment out if not using RA8875 display
 #define TEMPMON_ROOMTEMP 25.0f
@@ -230,7 +231,7 @@ extern struct maps myMapFiles[];
 #define VOLUME_ENCODER_A 2
 #define VOLUME_ENCODER_B 3
 #define FILTER_ENCODER_A 15
-#define FILTER_ENCODER_B 14
+#define FILTER_ENCODER_B 14  // 14.  Change this to 41 when using SPDIF.
 #define FINETUNE_ENCODER_A 4
 #define FINETUNE_ENCODER_B 5
 #define TUNE_ENCODER_A 16
@@ -246,39 +247,31 @@ extern struct maps myMapFiles[];
 #define PTT 37           // Transmit/Receive
 #define MUTE 38          // Mute Audio,  HIGH = "On" Audio available from Audio PA, LOW = Mute audio
 //========================================= Keyer pins
-#define KEYER_DAH_INPUT_RING 35  // Ring connection for keyer  -- default for righthanded user
+#define KEYER_DAH_INPUT_RING 35  // Ring connection for keyer.  Default for righthanded user.  Also straight key.
 #define KEYER_DIT_INPUT_TIP 36   // Tip connection for keyer
-#define OPTO_OUTPUT 24           // To optoisolator and keyed circuit
-#define STRAIGHT_KEY 0
 #define KEYER 1
 //========================================================= End Pin Assignments =================================
 #define TMS0_POWER_DOWN_MASK (0x1U)
 #define TMS1_MEASURE_FREQ(x) (((uint32_t)(((uint32_t)(x)) << 0U)) & 0xFFFFU)
-#undef round
-#undef HALF_PI
 #undef TWO_PI
-#define HALF_PI 1.5707963267948966192313216916398f
 #define TWO_PI 6.283185307179586476925286766559f
-#define PIH HALF_PI
+#define PIH 1.5707963267948966192313216916398f
 #define FOURPI (2.0f * TWO_PI)
 #define SIXPI (3.0f * TWO_PI)
 #define Si_5351_crystal 25000000L
-#define SSB_MODE 0
-#define CW_MODE 1
-#define SSB_RECEIVE 0
-#define CW_RECEIVE 2
-//  This second set of states are for the loop() modal state machine.
-#define SSB_RECEIVE_STATE 0
-#define SSB_TRANSMIT_STATE 1
-#define CW_RECEIVE_STATE 2
-#define AM_RECEIVE_STATE 5
-#define CW_TRANSMIT_STRAIGHT_STATE 3
-#define CW_TRANSMIT_KEYER_STATE 4
+
+//  States for the loop() modal state machine.
+enum class RadioState{SSB_RECEIVE_STATE, SSB_TRANSMIT_STATE, CW_RECEIVE_STATE, CW_TRANSMIT_STRAIGHT_STATE, 
+                      CW_TRANSMIT_KEYER_STATE, AM_RECEIVE_STATE, SSB_CALIBRATE_STATE, CW_CALIBRATE_STATE, 
+                      SET_CW_SIDETONE, NOSTATE};
+enum class RadioMode{SSB_MODE, CW_MODE, AM_MODE};  // Probably need only modes, not receive or transmit.
+
 #define SPECTRUM_ZOOM_1 0
 #define SPECTRUM_ZOOM_2 1
 #define SPECTRUM_ZOOM_4 2
 #define SPECTRUM_ZOOM_8 3
 #define SPECTRUM_ZOOM_16 4
+
 #define SAMPLE_RATE_8K 0
 #define SAMPLE_RATE_11K 1
 #define SAMPLE_RATE_16K 2
@@ -367,7 +360,6 @@ extern float32_t *sinBuffer;  // Buffers commonized.  Greg KF5N, February 7, 202
 extern float32_t cwRiseBuffer[];
 extern float32_t cwFallBuffer[];
 extern int filterWidth;
-extern boolean use_HP_filter;  //enable the software HP filter to get rid of DC?
 
 //===== New histogram stuff
 extern float32_t pixel_per_khz;  //AFP
@@ -396,11 +388,10 @@ struct config_t {
   uint32_t centerTuneStep = CENTER_TUNE_DEFAULT;       // JJP 7-3-23
   uint32_t fineTuneStep = FINE_TUNE_DEFAULT;           // JJP 7-3-23
   float32_t transmitPowerLevel = DEFAULT_POWER_LEVEL;  // Changed from int to float; Greg KF5N February 12, 2024
-  int xmtMode = SSB_MODE;                              // AFP 09-26-22
+  RadioMode xmtMode = RadioMode::SSB_MODE;             //
   int nrOptionSelect = 0;                              // 1 byte
   int currentScale = 1;
   long spectrum_zoom = SPECTRUM_ZOOM_2;
-  float spectrum_display_scale = 10.0;  // 4 bytes
   int CWFilterIndex = 5;                // Off
   int paddleDit = KEYER_DIT_INPUT_TIP;
   int paddleDah = KEYER_DAH_INPUT_RING;
@@ -428,16 +419,16 @@ struct config_t {
   int freqCorrectionFactor = 0;  //68000;
 #else
   //Conventional crystal with freq offset needs a correction factor
-  int freqCorrectionFactor = 68000;
+  int freqCorrectionFactor = 130000;
 #endif
 
   int equalizerRec[EQUALIZER_CELL_COUNT] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 };
   int equalizerXmt[EQUALIZER_CELL_COUNT] = { 0, 0, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 0, 0 };  // Provide equalizer optimized for SSB voice based on Neville's tests.  KF5N November 2, 2023
-  int currentMicThreshold = -10;                                                                              // 4 bytes       AFP 09-22-22
-  float currentMicCompRatio = 8.0;
-  float currentMicAttack = 0.1;
-  float currentMicRelease = 0.1;
-  int currentMicGain = 15;  // Was 20; revised downward as a more conservative default.  KF5N February 5, 2024.
+  float currentMicThreshold = -10.0;                                                                              // 4 bytes       AFP 09-22-22
+  float currentMicCompRatio = 10.0;
+//  float currentMicAttack = 0.1;
+//  float currentMicRelease = 0.1;
+  float currentMicGain = 0.0;  // Open Audio gain element.  Gain is in dB.
   int switchValues[18] = { 924, 870, 817,
                            769, 713, 669,
                            616, 565, 513,
@@ -452,12 +443,14 @@ struct config_t {
   float pll_fmax = 4000.0;                                                                  // 4 bytes
   float powerOutCW[NUMBER_OF_BANDS] = { 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035 };  // powerOutCW and powerOutSSB are derived from the TX power setting and calibration factors.
   float powerOutSSB[NUMBER_OF_BANDS] = { 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035 };
-  float CWPowerCalibrationFactor[NUMBER_OF_BANDS] = { 0.05, 0.05, .05, .05, .05, .05, .05 };        // Increased to 0.04, was 0.019; KF5N February 20, 2024
-  float SSBPowerCalibrationFactor[NUMBER_OF_BANDS] = { 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05 };  // Increased to 0.04, was 0.008; KF5N February 21, 2024
-  float IQAmpCorrectionFactor[NUMBER_OF_BANDS] = { 1, 1, 1, 1, 1, 1, 1 };
-  float IQPhaseCorrectionFactor[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
-  float IQXAmpCorrectionFactor[NUMBER_OF_BANDS] = { 1, 1, 1, 1, 1, 1, 1 };
-  float IQXPhaseCorrectionFactor[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
+  float CWPowerCalibrationFactor[NUMBER_OF_BANDS] =  { 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8 };        // Increased to 0.04, was 0.019; KF5N February 20, 2024
+  float SSBPowerCalibrationFactor[NUMBER_OF_BANDS] = { 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8 };  // Increased to 0.04, was 0.008; KF5N February 21, 2024
+  float IQRXAmpCorrectionFactor[NUMBER_OF_BANDS] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 };
+  float IQRXPhaseCorrectionFactor[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
+  float IQCWAmpCorrectionFactor[NUMBER_OF_BANDS] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 };
+  float IQCWPhaseCorrectionFactor[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
+  float IQSSBAmpCorrectionFactor[NUMBER_OF_BANDS] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 };
+  float IQSSBPhaseCorrectionFactor[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
   uint32_t favoriteFreqs[13] = { 3560000, 3690000, 7030000, 7200000, 14060000, 14200000, 21060000, 21285000, 28060000, 28365000, 5000000, 10000000, 15000000 };
 
   //DB2OO, 23-AUG-23: Region 1 freqs (from https://qrper.com/qrp-calling-frequencies/)
@@ -477,7 +470,7 @@ struct config_t {
   float myLong = MY_LON;
   float myLat = MY_LAT;
   int currentNoiseFloor[NUMBER_OF_BANDS]{ 0 };
-  int compressorFlag = 0;  // JJP 8/28/23
+  int compressorFlag = 1;  // CESSB compressor is always on!
   bool xmitEQFlag = false;
   bool receiveEQFlag = false;
   int calFreq = 0;                    // This is an index into an array of tone frequencies, for example:  {750, 3000}.  Default to 750 Hz. KF5N March 12, 2024
@@ -485,11 +478,16 @@ struct config_t {
   int buttonThresholdReleased = 964;  // buttonThresholdPressed + WIGGLE_ROOM
   int buttonRepeatDelay = 300000;     // Increased to 300000 from 200000 to better handle cheap, wornout buttons.
 #ifdef QSE2
-  q15_t iDCoffset[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
-  q15_t qDCoffset[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
-  q15_t dacOffset = 1100;  // This must be "tuned" for each radio and/or Audio Adapter board.
+  q15_t iDCoffsetCW[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
+  q15_t qDCoffsetCW[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
+  q15_t iDCoffsetSSB[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
+  q15_t qDCoffsetSSB[NUMBER_OF_BANDS] = { 0, 0, 0, 0, 0, 0, 0 };
+  q15_t dacOffsetCW = 1100;  // This must be "tuned" for each radio and/or Audio Adapter board.
+  q15_t dacOffsetSSB = 1100;  // This must be "tuned" for each radio and/or Audio Adapter board.
 #endif
-  bool radioCalComplete = false;
+  bool CWradioCalComplete = false;
+  bool SSBradioCalComplete = false;
+  bool cessb = true;
 };
 
 extern struct config_t EEPROMData;
@@ -520,14 +518,14 @@ extern float32_t EQ_Band14Coeffs[];
 // ================= end  AFP 10-02-22 ===========
 //Hilbert FIR Filter
 
-extern float32_t FIR_Hilbert_state_L[];
-extern float32_t FIR_Hilbert_state_R[];
+//extern float32_t FIR_Hilbert_state_L[];
+//extern float32_t FIR_Hilbert_state_R[];
 
-extern float32_t FIR_Hilbert_coeffs_45[];     //AFP 01-16-22
-extern float32_t FIR_Hilbert_coeffs_neg45[];  //AFP 01-16-22
+//extern float32_t FIR_Hilbert_coeffs_45[];     //AFP 01-16-22
+//extern float32_t FIR_Hilbert_coeffs_neg45[];  //AFP 01-16-22
 
-extern arm_fir_instance_f32 FIR_Hilbert_L;
-extern arm_fir_instance_f32 FIR_Hilbert_R;
+//extern arm_fir_instance_f32 FIR_Hilbert_L;
+//extern arm_fir_instance_f32 FIR_Hilbert_R;
 
 extern float32_t CW_Filter_Coeffs2[];        //AFP 10-25-22
 extern arm_fir_instance_f32 FIR_CW_DecodeL;  //AFP 10-25-22
@@ -535,8 +533,8 @@ extern arm_fir_instance_f32 FIR_CW_DecodeR;  //AFP 10-25-22
 extern float32_t FIR_CW_DecodeL_state[];     //AFP 10-25-22
 extern float32_t FIR_CW_DecodeR_state[];     //AFP 10-25-22
 
-extern arm_fir_decimate_instance_f32 FIR_dec1_EX_I;
-extern arm_fir_decimate_instance_f32 FIR_dec1_EX_Q;
+//extern arm_fir_decimate_instance_f32 FIR_dec1_EX_I;
+//extern arm_fir_decimate_instance_f32 FIR_dec1_EX_Q;
 extern arm_fir_decimate_instance_f32 FIR_dec2_EX_I;
 extern arm_fir_decimate_instance_f32 FIR_dec2_EX_Q;
 
@@ -545,10 +543,10 @@ extern arm_fir_interpolate_instance_f32 FIR_int1_EX_Q;
 extern arm_fir_interpolate_instance_f32 FIR_int2_EX_I;
 extern arm_fir_interpolate_instance_f32 FIR_int2_EX_Q;
 
-extern float32_t FIR_dec1_EX_I_state[];  //48 + (uint16_t) BUFFER_SIZE * (uint32_t) N_B - 1
-extern float32_t FIR_dec1_EX_Q_state[];
-extern float32_t FIR_dec2_EX_I_state[];  //DEC2STATESIZE
-extern float32_t FIR_dec2_EX_Q_state[];
+//extern float32_t FIR_dec1_EX_I_state[];  //48 + (uint16_t) BUFFER_SIZE * (uint32_t) N_B - 1
+//extern float32_t FIR_dec1_EX_Q_state[];
+//extern float32_t FIR_dec2_EX_I_state[];  //DEC2STATESIZE
+//extern float32_t FIR_dec2_EX_Q_state[];
 extern float32_t FIR_int2_EX_I_state[];
 extern float32_t FIR_int2_EX_Q_state[];
 extern float32_t FIR_int1_EX_I_state[];
@@ -568,29 +566,31 @@ void ExciterIQData();
 extern int32_t NCOFreq;  // AFP 04-16-22
 
 //======================================== Global object declarations ==================================================
-// Teensy and OpenAudio objects.  Revised by KF5N March 12, 2024
-extern AudioConnection patchCord1;   // This patchcord is used to disconnect the microphone input datastream.
+// Teensy and OpenAudio objects.  Revised by KF5N July 24, 2024
+//extern AudioConnection patchCord1;   // This patchcord is used to disconnect the microphone input datastream.
 extern AudioConnection patchCord15;  // Patch cords 15 and 16 are used to connect/disconnect the I and Q datastreams.
 extern AudioConnection patchCord16;
 
 extern AudioAmplifier volumeAdjust;
-
 extern AudioRecordQueue Q_in_L;
 extern AudioRecordQueue Q_in_R;
 extern AudioRecordQueue Q_in_L_Ex;
-
+extern AudioRecordQueue Q_in_R_Ex;
 extern AudioPlayQueue Q_out_L;
 extern AudioPlayQueue Q_out_L_Ex;
 extern AudioPlayQueue Q_out_R_Ex;
 
-// = AFP 11-01-22
-extern AudioControlSGTL5000_Extended sgtl5000_1;  //controller for the Teensy Audio Board
-extern AudioConvert_I16toF32 int2Float1;          //Converts Int16 to Float.  See class in AudioStream_F32.h
-extern AudioEffectCompressor_F32 comp1;
-extern AudioConvert_F32toI16 float2Int1;  //Converts Float to Int16.  See class in AudioStream_F32.h
+extern AudioControlSGTL5000_Extended sgtl5000_1;  // F32 controller for the Teensy Audio Board
+extern AudioConvert_I16toF32 int2Float1;          // Converts Int16 to Float.  See class in AudioStream_F32.h
+extern AudioEffectGain_F32 micGain;               // Added with CESSB.  Greg KF5N July 24, 2024.
+extern AudioConvert_F32toI16 float2Int1;          // Converts Float to Int16.  See class in AudioStream_F32.h
+extern AudioSynthWaveformSine_F32 tone1kHz;
+extern AudioMixer4_F32 mixer1;
+extern AudioEffectCompressor2_F32  compressor1;   // Open Audio Compressor 2
+extern radioCESSB_Z_transmit_F32 cessb1;
 // end Teensy and OpenAudio objects
 
-extern void SetAudioOperatingState(int operatingState);
+extern void SetAudioOperatingState(RadioState operatingState);  // Configures audio system for requested mode state.
 
 extern Rotary volumeEncoder;    // (2,  3)
 extern Rotary tuneEncoder;      // (16, 17)
@@ -599,7 +599,8 @@ extern Rotary fineTuneEncoder;  // (4,  5);
 
 extern Metro ms_500;
 
-extern Calibrate calibrater;
+extern CWCalibrate calibrater;         // CW mode calibration object.
+extern SSBCalibrate ssbcalibrater;   // SSB mode calibration object.
 
 extern Si5351 si5351;
 
@@ -706,7 +707,6 @@ extern uint8_t NR_Kim;
 extern uint8_t SampleRate;
 extern uint8_t sch;
 extern uint8_t state;
-extern uint8_t T41State;
 extern uint8_t zoom_display;
 extern const uint8_t NR_L_frames;
 extern const uint8_t NR_N_frames;
@@ -719,14 +719,12 @@ extern const uint32_t IIR_biquad_Zoom_FFT_N_stages;
 extern const uint32_t N_stages_biquad_lowpass1;
 extern const uint16_t n_dec1_taps;
 extern const uint16_t n_dec2_taps;
-extern int mute;
 extern bool agc_action;
 extern int attenuator;
 extern int audioYPixel[];
 extern int bandswitchPins[];
 extern bool calibrateFlag;
 extern int chipSelect;
-extern int decoderFlag;
 extern int fLoCutOld;
 extern int fHiCutOld;
 extern volatile int filterEncoderMove;
@@ -743,12 +741,12 @@ extern int newCursorPosition;
 extern int NR_Index;
 extern int oldCursorPosition;
 extern int paddleFlip;
-extern int radioState, lastState;  // Used by the loop to monitor current state.
+extern RadioMode radioMode;
+extern RadioState radioState, lastState;  // Used by the loop to monitor current state.
 extern int resetTuningFlag;        // Experimental flag for ResetTuning() due to possible timing issues.  KF5N July 31, 2023
 extern int selectedMapIndex;
 extern bool switchFilterSideband;  //AFP 1-28-21
 extern int x2;                     //AFP
-extern int xrState;
 extern int zeta_help;
 extern int zoomIndex;
 extern bool updateDisplayFlag;
@@ -895,7 +893,6 @@ extern float32_t NR_long_tone_gain[];
 extern float32_t R_BufferOffset[];
 extern float32_t ring[];
 extern const float32_t volumeLog[101];
-extern float32_t spectrum_display_scale;  // 30.0
 extern float32_t tmp;
 extern float32_t w;
 extern float angl;
@@ -1021,6 +1018,7 @@ float GetEncoderValueLive(float minValue, float maxValue, float startValue, floa
 q15_t GetEncoderValueLiveQ15t(int minValue, int maxValue, int startValue, int increment, char prompt[], bool left);
 void GetFavoriteFrequency();
 float HaversineDistance(float dxLat, float dxLon);
+void InitializeDataArrays();
 int InitializeSDCard();
 void InitFilterMask();
 void InitLMSNoiseReduction();
@@ -1036,7 +1034,7 @@ void KeyRingOn();
 void KeyTipOn();
 void LMSNoiseReduction(int16_t blockSize, float32_t *nrbuffer);
 float32_t log10f_fast(float32_t X);
-void MicOptions();
+//void MicOptions();
 int ModeOptions();
 //DB2OO, 29-AUG-23: added
 void MorseCharacterDisplay(char currentLetter);
@@ -1060,10 +1058,10 @@ void ResetTuning();  // AFP 10-11-22
 void RFOptions();
 void ResetZoom(int zoomIndex1);  // AFP 11-06-22
 int SDPresentCheck();
-void SetCompressionLevel();
+void SetCompressionThreshold();
 void SetCompressionRatio();
-void SetCompressionAttack();
-void SetCompressionRelease();
+//void SetCompressionAttack();
+//void SetCompressionRelease();
 void MicGainSet();
 void SaveAnalogSwitchValues();
 void SelectCWFilter();  // AFP 10-18-22
@@ -1082,7 +1080,6 @@ void SetSideToneVolume();  // This function uses encoder to set sidetone volume.
 long SetTransmitDelay();
 void SetTransmitDitLength(int wpm);  // JJP 8/19/23
 void SetupMode(int sideBand);
-void SetupMyCompressors(bool use_HP_filter, float knee_dBFS, float comp_ratio, float attack_sec, float release_sec);  //AFP 11-01-22 in DSP.cpp
 int SetWPM();
 void ShowAutoStatus();
 void ShowBandwidth();
@@ -1093,10 +1090,10 @@ void initCWShaping();
 void SpectrumOptions();
 void UpdateInfoWindow();
 void SetFreqCal(int calFreqShift);
-extern "C" {
-  void sincosf(float err, float *s, float *c);
-  void sincos(double err, double *s, double *c);
-}
+//extern "C" {
+//  void sincosf(float err, float *s, float *c);
+//  void sincos(double err, double *s, double *c);
+//}
 void ShowFrequency();
 void ShowMenu(const char *menu[], int where);
 void ShowName();
@@ -1108,6 +1105,7 @@ void BandInformation();
 void SpectralNoiseReduction(void);
 void SpectralNoiseReductionInit();
 void Splash();
+void SSBOptions();
 int SubmenuSelect(const char *options[], int numberOfChoices, int defaultStart);
 
 void T4_rtc_set(unsigned long t);
@@ -1117,6 +1115,7 @@ void UpdateAGCField();
 void UpdateCompressionField();
 void UpdateDecoderField();
 void UpdateEqualizerField(bool rxEqState, bool txEqState);
+void updateMic();  // This updates the Open Audio compressor.
 void UpdateNoiseField();
 void UpdateNotchField();
 void UpdateSDIndicator(int present);

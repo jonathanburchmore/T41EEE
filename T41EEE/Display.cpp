@@ -146,7 +146,7 @@ void ShowSpectrum() {
     // Don't call this function unless the filter bandwidth has been adjusted.  This requires 2 global variables.
     if (filter_pos != last_filter_pos) FilterSetSSB();
 
-    if (T41State == SSB_RECEIVE || T41State == CW_RECEIVE) {  // AFP 08-24-22
+    if (radioMode == RadioMode::SSB_MODE or radioMode == RadioMode::CW_MODE or radioMode == RadioMode::AM_MODE) {  // AFP 08-24-22
       ProcessIQData();                                        // Call the Audio process from within the display routine to eliminate conflicts with drawing the spectrum and waterfall displays
     }
     EncoderCenterTune();  //Moved the tuning encoder to reduce lag times and interference during tuning.
@@ -172,7 +172,7 @@ void ShowSpectrum() {
         FH_max_box = k;              // Index of FH_max.
       }
     }  
-    }//  HB finish
+    } //  HB finish
 
     // Prevent spectrum from going below the bottom of the spectrum area.  KF5N
     if (y_new_plot > 247) y_new_plot = 247;
@@ -632,7 +632,7 @@ void BandInformation()  // SSB or CW
   tft.setCursor(OPERATION_STATS_X + 90, FREQUENCY_Y + 30);  //AFP 10-18-22
 
   //================  AFP 10-19-22
-  if (EEPROMData.xmtMode == CW_MODE) {
+  if (EEPROMData.xmtMode == RadioMode::CW_MODE) {
     tft.fillRect(OPERATION_STATS_X + 85, FREQUENCY_Y + 30, 70, tft.getFontHeight(), RA8875_BLACK);
     tft.print("CW ");
     tft.setCursor(OPERATION_STATS_X + 115, FREQUENCY_Y + 30);  //AFP 10-18-22
@@ -666,7 +666,8 @@ void BandInformation()  // SSB or CW
     //================  AFP 10-19-22 =========
   } else {
     tft.fillRect(OPERATION_STATS_X + 90, FREQUENCY_Y + 30, 70, tft.getFontHeight(), RA8875_BLACK);
-    tft.print("SSB");  // Which mode
+    if(EEPROMData.cessb) tft.print("CESSB");  // Which mode
+    if(not EEPROMData.cessb) tft.print("SSB Data");
   }
 
   tft.fillRect(OPERATION_STATS_X + 160, FREQUENCY_Y + 30, tft.getFontWidth() * 11, tft.getFontHeight(), RA8875_BLACK);  // AFP 11-01-22 Clear top-left menu area
@@ -1203,7 +1204,7 @@ void UpdateZoomField() {
 
 
 /*****
-  Purpose: Updates the compression setting in Info Window
+  Purpose: Updates the compression setting in the info window.
 
   Parameter list:
     void
@@ -1213,16 +1214,16 @@ void UpdateZoomField() {
 *****/
 void UpdateCompressionField()  // JJP 8/26/2023
 {
-  tft.fillRect(COMPRESSION_X, COMPRESSION_Y, 200, 15, RA8875_BLACK);
+  tft.fillRect(COMPRESSION_X, COMPRESSION_Y - 2, 175, 15, RA8875_BLACK);
   tft.setFontScale((enum RA8875tsize)0);
   tft.setTextColor(RA8875_WHITE);  // Display zoom factor
   tft.setCursor(COMPRESSION_X + 5, COMPRESSION_Y - 5);
   tft.print("Compress:");
   tft.setCursor(FIELD_OFFSET_X, COMPRESSION_Y - 5);
   tft.setTextColor(RA8875_GREEN);
-  if (EEPROMData.compressorFlag == 1) {  // JJP 8/26/2023
+  if (EEPROMData.compressorFlag == true) {  // JJP 8/26/2023
     tft.print("On  ");
-    tft.print(EEPROMData.currentMicThreshold);
+    tft.print(EEPROMData.currentMicCompRatio, 0);   // This is the compression ratio of the Open Audio compressor.  Greg KF5N July 22, 2024
   } else {
     tft.setCursor(FIELD_OFFSET_X, COMPRESSION_Y - 5);
     tft.print("Off");
@@ -1256,7 +1257,7 @@ FLASHMEM void UpdateDecoderField() {
     //    tft.fillRect(FIELD_OFFSET_X, DECODER_Y - 5, 140, 17, RA8875_BLACK);  // Erase
     tft.print("Off");
   }
-  if (EEPROMData.xmtMode == CW_MODE && EEPROMData.decoderFlag) {  // In CW mode with decoder on? AFP 09-27-22
+  if (EEPROMData.xmtMode == RadioMode::CW_MODE && EEPROMData.decoderFlag) {  // In CW mode with decoder on? AFP 09-27-22
     tft.writeTo(L2);
     // Draw delimiter bars for CW offset frequency.  This depends on the user selected offset.
     if (EEPROMData.CWOffset == 0) {
@@ -1609,7 +1610,7 @@ void EraseSecondaryMenu() {
 void ShowTransmitReceiveStatus() {
   tft.setFontScale((enum RA8875tsize)1);
   tft.setTextColor(RA8875_BLACK);
-  if (xrState == TRANSMIT_STATE) {
+  if (radioState == RadioState::SSB_TRANSMIT_STATE or radioState == RadioState::CW_TRANSMIT_STRAIGHT_STATE or radioState == RadioState::CW_TRANSMIT_KEYER_STATE) {
     tft.fillRect(X_R_STATUS_X, X_R_STATUS_Y, 55, 25, RA8875_RED);
     tft.setCursor(X_R_STATUS_X + 4, X_R_STATUS_Y - 5);
     tft.print("XMT");

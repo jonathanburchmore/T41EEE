@@ -113,10 +113,10 @@ void FreqShift2()
   //  ShowFrequency();
   //  DrawBandWidthIndicatorBar();
   //}
-  if (EEPROMData.xmtMode == SSB_MODE ) {
+  if (EEPROMData.xmtMode == RadioMode::SSB_MODE ) {
     sideToneShift = 0;
   } else {
-    if (EEPROMData.xmtMode == CW_MODE ) {
+    if (EEPROMData.xmtMode == RadioMode::CW_MODE ) {
       cwFreqOffset = (EEPROMData.CWOffset + 6) * 24000 / 256;
       if (bands[EEPROMData.currentBand].mode == 1) {
         sideToneShift = cwFreqOffset;  // KF5N experiment
@@ -127,7 +127,7 @@ void FreqShift2()
       }
     }
   }
-  NCO_INC = 2.0 * PI * (NCOFreq + sideToneShift) / 192000.0; //192000 SPS is the actual sample rate used in the Receive ADC
+  NCO_INC = 2.0 * PI * (NCOFreq + sideToneShift) / SR[SampleRate].rate; // 192000 SPS is the actual sample rate used in the Receive ADC
 
   OSC_COS = cos (NCO_INC);
   OSC_SIN = sin (NCO_INC);
